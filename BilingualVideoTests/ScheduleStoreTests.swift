@@ -2,6 +2,25 @@ import XCTest
 @testable import BilingualVideo
 
 final class ScheduleStoreTests: XCTestCase {
+    func testDelayedScheduleAndPlaybackCheckpointRoundTrip() throws {
+        let environment = try TemporaryAppEnvironment()
+        let store = ScheduleStore(fileURL: environment.directories.scheduleURL)
+        let first = LocalDay(year: 2026, month: 9, day: 4)
+        let last = LocalDay(year: 2026, month: 9, day: 8)
+        let plan = ViewingPlan(startDay: first, orderedPairIDs: [1, 2], updatedAt: testDate(2026, 9, 8),
+                               scheduledDays: [first, last],
+                               playbackTracking: PlanPlaybackTracking(day: last, hasPlayed: true))
+        try store.save(plan)
+        XCTAssertEqual(try store.load(), plan)
+        let bytes = try Data(contentsOf: environment.directories.scheduleURL)
+        for invalidDays in [[first], [first, first], [last, first]] {
+            var invalid = plan
+            invalid.scheduledDays = invalidDays
+            XCTAssertThrowsError(try store.save(invalid))
+            XCTAssertEqual(try Data(contentsOf: environment.directories.scheduleURL), bytes)
+        }
+    }
+
     func testSaveLoadAndAtomicReplacement() throws {
         let environment = try TemporaryAppEnvironment()
         let store = ScheduleStore(

@@ -19,10 +19,13 @@ final class ScheduleStore {
     func load() throws -> ViewingPlan? {
         guard fileManager.fileExists(atPath: fileURL.path) else { return nil }
         let data = try Data(contentsOf: fileURL)
-        return try decoder.decode(ViewingPlan.self, from: data)
+        let plan = try decoder.decode(ViewingPlan.self, from: data)
+        try validate(plan)
+        return plan
     }
 
     func save(_ plan: ViewingPlan) throws {
+        try validate(plan)
         let directoryURL = fileURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
 
@@ -50,5 +53,23 @@ final class ScheduleStore {
             [.protectionKey: FileProtectionType.complete],
             ofItemAtPath: fileURL.path
         )
+    }
+
+    private func validate(_ plan: ViewingPlan) throws {
+        if let progress = plan.strictPlayback {
+            guard !progress.pairIDs.isEmpty,
+                  Set(progress.pairIDs).count == progress.pairIDs.count,
+                  (0...progress.episodeCount).contains(progress.index),
+                  progress.position.isFinite, progress.position >= 0,
+                  !progress.isFinished || progress.position == 0 else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+        }
+        guard let days = plan.scheduledDays else { return }
+        guard days.count == plan.orderedPairIDs.count,
+              days.first == nil || days.first == plan.startDay,
+              zip(days, days.dropFirst()).allSatisfy({ $0 < $1 }) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
     }
 }

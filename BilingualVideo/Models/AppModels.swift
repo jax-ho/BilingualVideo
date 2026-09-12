@@ -1,5 +1,19 @@
 import Foundation
 
+enum PlaybackMode: String, CaseIterable, Hashable, Identifiable {
+    case normal
+    case strict
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .normal: "普通"
+        case .strict: "严格"
+        }
+    }
+}
+
 enum VideoLanguage: String, CaseIterable, Codable, Hashable, Identifiable {
     case chinese
     case english
@@ -113,6 +127,65 @@ struct ViewingPlan: Codable, Equatable {
     var startDay: LocalDay
     var orderedPairIDs: [Int]
     var updatedAt: Date
+    var scheduledDays: [LocalDay]? = nil
+    var playbackTracking: PlanPlaybackTracking? = nil
+    var strictPlayback: StrictPlaybackProgress? = nil
+
+    func hasSameSchedule(as other: ViewingPlan) -> Bool {
+        startDay == other.startDay && orderedPairIDs == other.orderedPairIDs
+            && scheduledDays == other.scheduledDays
+    }
+}
+
+struct PlanPlaybackTracking: Codable, Equatable {
+    var day: LocalDay
+    var hasPlayed: Bool
+}
+
+/// The queue identifies the day's plan that this progress belongs to.
+/// Advancing the index, not a seek position near the end, completes an episode.
+struct StrictPlaybackProgress: Codable, Equatable {
+    let day: LocalDay
+    let pairIDs: [Int]
+    var index = 0
+    var position: Double = 0
+    var hasStarted = false
+    // Optional for compatibility with checkpoints saved before queue resets.
+    var sessionID: UUID? = UUID()
+
+    var episodeCount: Int { pairIDs.count * 2 }
+    var isFinished: Bool { index == episodeCount }
+}
+
+struct StrictPlaybackRequest: Identifiable, Equatable {
+    let day: LocalDay
+    let index: Int
+    let sessionID: UUID?
+    let video: PlayableVideo
+    let position: Double
+    let episodeCount: Int
+
+    var id: String { "\(day.year)-\(day.month)-\(day.day)-\(sessionID?.uuidString ?? "legacy")-\(index)-\(video.id)" }
+}
+
+enum StrictPlaybackError: LocalizedError {
+    case expired
+    case invalidProgress
+
+    var errorDescription: String? {
+        switch self {
+        case .expired: "日期、计划或播放模式已变化，请返回首页重新开始今天的播放。"
+        case .invalidProgress: "播放进度无法读取，请让家长检查。"
+        }
+    }
+}
+
+enum PlanEditingError: LocalizedError {
+    case staleDraft
+
+    var errorDescription: String? {
+        "日期已变化，计划可能已自动顺延。请重新打开计划编辑后再修改，避免覆盖最新安排。"
+    }
 }
 
 struct ScheduledPair: Identifiable, Equatable {
@@ -158,13 +231,29 @@ struct LibraryScanResult: Equatable {
     }
 }
 
-enum TodayState: Equatable {
-    case noScheduledItem
+enum TodayState: Equatable, Identifiable {
     case scheduledResourceUnavailable(pairID: Int)
     case playable(VideoPair)
+
+    var id: Int {
+        switch self {
+        case let .scheduledResourceUnavailable(pairID): pairID
+        case let .playable(pair): pair.id
+        }
+    }
 }
 
-struct PlayableVideo: Identifiable {
+enum PlaybackSequenceError: LocalizedError {
+    case unavailablePair(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case let .unavailablePair(pairID): "下一集（编号 \(pairID)）的中英文资源不完整，请让家长检查。"
+        }
+    }
+}
+
+struct PlayableVideo: Identifiable, Equatable {
     let pairID: Int
     let language: VideoLanguage
     let url: URL

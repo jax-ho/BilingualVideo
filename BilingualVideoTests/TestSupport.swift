@@ -4,8 +4,11 @@ import Foundation
 final class TemporaryAppEnvironment {
     let rootURL: URL
     let directories: AppDirectories
+    let preferences: UserDefaults
+    private let preferencesName = "BilingualVideoTests-\(UUID().uuidString)"
 
     init() throws {
+        preferences = UserDefaults(suiteName: preferencesName)!
         let fileManager = FileManager.default
         rootURL = fileManager.temporaryDirectory.appendingPathComponent(
             "BilingualVideoTests-\(UUID().uuidString)",
@@ -20,6 +23,7 @@ final class TemporaryAppEnvironment {
     }
 
     deinit {
+        preferences.removePersistentDomain(forName: preferencesName)
         try? FileManager.default.removeItem(at: rootURL)
     }
 

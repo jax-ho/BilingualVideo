@@ -5,6 +5,8 @@ build/
 xcuserdata/
 /MockVideoLibraries-*/
 *.mp4
+!BilingualVideoTests/Fixtures/short.mp4
+!BilingualVideoTests/Fixtures/strict-playback.mp4
 *.ipa
 *.xcarchive
 *.xcresult

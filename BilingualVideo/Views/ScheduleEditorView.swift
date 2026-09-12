@@ -142,10 +142,7 @@ struct ScheduleEditorView: View {
 
             if let draft {
                 LabeledContent("视频组数", value: "\(draft.orderedPairIDs.count)")
-                if let endDay = draft.startDay.adding(
-                    days: max(draft.orderedPairIDs.count - 1, 0),
-                    calendar: appModel.scheduleService.calendar
-                ) {
+                if let endDay = appModel.scheduleService.preview(draft).last?.day {
                     LabeledContent("结束日期", value: format(endDay))
                 }
             }
@@ -209,9 +206,11 @@ struct ScheduleEditorView: View {
             }
             return date
         } set: { newDate in
-            guard var copy = draft else { return }
-            copy.startDay = appModel.scheduleService.day(containing: newDate)
-            draft = copy
+            guard let current = draft,
+                  let difference = appModel.scheduleService.dayDifference(
+                    from: current.startDay, to: appModel.scheduleService.day(containing: newDate)
+                  ) else { return }
+            draft = appModel.scheduleService.shifting(current, byDays: difference)
             chosenStartDate = newDate
             calendarFocusDate = newDate
         }
@@ -223,7 +222,7 @@ struct ScheduleEditorView: View {
         case (nil, .some): true
         case (.some, nil): true
         case let (.some(saved), .some(draft)):
-            saved.startDay != draft.startDay || saved.orderedPairIDs != draft.orderedPairIDs
+            !saved.hasSameSchedule(as: draft)
         }
     }
 
@@ -277,6 +276,8 @@ struct ScheduleEditorView: View {
             self.draft = appModel.savedPlan
             shouldCloseAfterSave = true
             isShowingSavePreview = false
+        } catch let error as PlanEditingError {
+            saveError = error.localizedDescription
         } catch {
             saveError = "计划文件写入失败，旧计划仍然保留。"
         }
@@ -330,8 +331,6 @@ private struct PlanCalendarShiftView: View {
 
     @State private var selectedPairID: Int?
     @State private var adjustmentMessage: String?
-
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 5), count: 7)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -408,27 +407,37 @@ private struct PlanCalendarShiftView: View {
             DatePicker("查看日期", selection: $focusDate, displayedComponents: .date)
                 .datePickerStyle(.compact)
 
-            LazyVGrid(columns: columns, spacing: 6) {
-                ForEach(rotatedWeekdaySymbols, id: \.self) { symbol in
-                    Text(symbol)
-                        .font(.caption.bold())
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
+            // A month is at most six rows. Measure them eagerly so the enclosing
+            // List gets a stable row height even when the calendar starts offscreen.
+            Grid(horizontalSpacing: 6, verticalSpacing: 6) {
+                GridRow {
+                    ForEach(Array(rotatedWeekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                        Text(symbol)
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
 
-                ForEach(Array(monthCells.enumerated()), id: \.offset) { _, day in
-                    if let day {
-                        CalendarDaySelectionCell(
-                            day: day,
-                            pairID: pairID(on: day),
-                            accessibilityDate: format(day),
-                            hasSelectedPair: selectedPairID != nil,
-                            onSelect: { select(day: day) }
-                        )
-                    } else {
-                        Color.clear
-                            .frame(minHeight: 68)
-                            .accessibilityHidden(true)
+                let cells = monthCells
+                ForEach(Array(stride(from: 0, to: cells.count, by: 7)), id: \.self) { rowStart in
+                    GridRow {
+                        ForEach(0..<7) { column in
+                            let index = rowStart + column
+                            if index < cells.count, let day = cells[index] {
+                                CalendarDaySelectionCell(
+                                    day: day,
+                                    pairID: pairID(on: day),
+                                    accessibilityDate: format(day),
+                                    hasSelectedPair: selectedPairID != nil,
+                                    onSelect: { select(day: day) }
+                                )
+                            } else {
+                                Color.clear
+                                    .frame(maxWidth: .infinity, minHeight: 68)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                     }
                 }
             }
@@ -470,13 +479,8 @@ private struct PlanCalendarShiftView: View {
     }
 
     private func pairID(on day: LocalDay) -> Int? {
-        guard let startDate = plan.startDay.date(in: calendar),
-              let targetDate = day.date(in: calendar),
-              let offset = calendar.dateComponents([.day], from: startDate, to: targetDate).day,
-              plan.orderedPairIDs.indices.contains(offset) else {
-            return nil
-        }
-        return plan.orderedPairIDs[offset]
+        guard let date = day.date(in: calendar) else { return nil }
+        return ScheduleService(calendar: calendar).pairID(in: plan, on: date)
     }
 
     private func select(day: LocalDay) {
@@ -492,8 +496,7 @@ private struct PlanCalendarShiftView: View {
     }
 
     private func movementDescription(for pairID: Int, to targetDay: LocalDay) -> String {
-        guard let index = plan.orderedPairIDs.firstIndex(of: pairID),
-              let currentDay = plan.startDay.adding(days: index, calendar: calendar),
+        guard let currentDay = ScheduleService(calendar: calendar).preview(plan).first(where: { $0.pairID == pairID })?.day,
               let difference = calendar.dateComponents(
                 [.day],
                 from: currentDay.date(in: calendar) ?? focusDate,
@@ -586,10 +589,8 @@ private struct SavePlanPreviewView: View {
                 }
 
                 Section("新计划完整顺序") {
-                    ForEach(Array(newPlan.orderedPairIDs.enumerated()), id: \.offset) { index, pairID in
-                        if let day = newPlan.startDay.adding(days: index, calendar: calendar) {
-                            LabeledContent(format(day), value: "编号 \(pairID)")
-                        }
+                    ForEach(ScheduleService(calendar: calendar).preview(newPlan)) { entry in
+                        LabeledContent(format(entry.day), value: "编号 \(entry.pairID)")
                     }
                 }
             }

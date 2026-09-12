@@ -10,13 +10,29 @@ struct RootView: View {
     @ViewBuilder
     var body: some View {
         #if DEBUG
-        if UITestFixture.isShowingScheduleEditor {
+        if UITestFixture.isStrictPlayback {
+            if isShowingParentPortal {
+                ParentHomeView(onClose: { isShowingParentPortal = false })
+            } else {
+                NavigationStack {
+                    TodayView()
+                        .toolbar {
+                            Button("家长设置") { isShowingParentPortal = true }
+                                .accessibilityIdentifier("ui-test.parent")
+                        }
+                }
+            }
+        } else if UITestFixture.isShowingScheduleEditor {
             if isUITestScheduleEditorClosed {
-                ContentUnavailableView(
-                    "计划编辑已关闭",
-                    systemImage: "checkmark.circle"
-                )
-                .accessibilityIdentifier("schedule.editor.closed")
+                if ProcessInfo.processInfo.arguments.contains("--ui-test-viewing-settings") {
+                    NavigationStack { TodayView() }
+                } else {
+                    ContentUnavailableView(
+                        "计划编辑已关闭",
+                        systemImage: "checkmark.circle"
+                    )
+                    .accessibilityIdentifier("schedule.editor.closed")
+                }
             } else {
                 ParentHomeView(
                     onClose: { isUITestScheduleEditorClosed = true },

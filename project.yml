@@ -58,6 +58,7 @@ targets:
     platform: iOS
     sources:
       - path: BilingualVideoUITests
+      - path: BilingualVideoTests/Fixtures/strict-playback.mp4
     dependencies:
       - target: BilingualVideo
     settings:

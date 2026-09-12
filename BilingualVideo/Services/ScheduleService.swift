@@ -20,25 +20,60 @@ struct ScheduleService {
     }
 
     func pairID(in plan: ViewingPlan, on date: Date) -> Int? {
+        pairIDs(in: plan, on: date, dailyGroupCount: 1).first
+    }
+
+    func pairIDs(in plan: ViewingPlan, on date: Date, dailyGroupCount: Int) -> [Int] {
         let targetDay = day(containing: date)
-        guard let startDate = plan.startDay.date(in: calendar),
-              let targetDate = targetDay.date(in: calendar) else {
-            return nil
+        let offset: Int?
+        if let days = plan.scheduledDays {
+            offset = days.firstIndex(of: targetDay)
+        } else {
+            offset = dayDifference(from: plan.startDay, to: targetDay)
         }
-        let offset = calendar.dateComponents([.day], from: startDate, to: targetDate).day
-        guard let offset, plan.orderedPairIDs.indices.contains(offset) else {
-            return nil
+        guard dailyGroupCount > 0, let offset, plan.orderedPairIDs.indices.contains(offset) else {
+            return []
         }
-        return plan.orderedPairIDs[offset]
+        return Array(plan.orderedPairIDs.dropFirst(offset).prefix(dailyGroupCount))
+    }
+
+    func scheduledDays(in plan: ViewingPlan) -> [LocalDay] {
+        plan.scheduledDays ?? plan.orderedPairIDs.indices.compactMap {
+            plan.startDay.adding(days: $0, calendar: calendar)
+        }
     }
 
     func preview(_ plan: ViewingPlan) -> [ScheduledPair] {
-        plan.orderedPairIDs.enumerated().compactMap { index, pairID in
-            guard let day = plan.startDay.adding(days: index, calendar: calendar) else {
-                return nil
-            }
-            return ScheduledPair(index: index, pairID: pairID, day: day)
+        zip(plan.orderedPairIDs, scheduledDays(in: plan)).enumerated().map { index, entry in
+            ScheduledPair(index: index, pairID: entry.0, day: entry.1)
         }
+    }
+
+    /// Settle only finished calendar days. A missing checkpoint is a legacy
+    /// plan: start tracking today without inferring anything about earlier days.
+    func settlingUnplayedDays(in plan: ViewingPlan, at date: Date) -> ViewingPlan {
+        let today = day(containing: date)
+        var copy = plan
+        guard let tracking = plan.playbackTracking else {
+            copy.playbackTracking = PlanPlaybackTracking(day: today, hasPlayed: false)
+            return copy
+        }
+        guard tracking.day < today else { return copy }
+        let firstUnplayedDay = tracking.hasPlayed
+            ? tracking.day.adding(days: 1, calendar: calendar) ?? today
+            : tracking.day
+        var days = scheduledDays(in: plan)
+        if let index = days.firstIndex(where: { $0 >= firstUnplayedDay && $0 < today }),
+           let delay = dayDifference(from: days[index], to: today) {
+            let shifted = days[index...].compactMap { $0.adding(days: delay, calendar: calendar) }
+            guard shifted.count == days.count - index else { return copy }
+            days.replaceSubrange(index..., with: shifted)
+            copy.scheduledDays = days
+            copy.startDay = days[0]
+            copy.updatedAt = date
+        }
+        copy.playbackTracking = PlanPlaybackTracking(day: today, hasPlayed: false)
+        return copy
     }
 
     func shifting(_ plan: ViewingPlan, byDays days: Int) -> ViewingPlan {
@@ -47,17 +82,22 @@ struct ScheduleService {
         }
         var copy = plan
         copy.startDay = shiftedStart
+        if let scheduledDays = plan.scheduledDays {
+            let shifted = scheduledDays.compactMap { $0.adding(days: days, calendar: calendar) }
+            guard shifted.count == scheduledDays.count else { return plan }
+            copy.scheduledDays = shifted
+        }
         return copy
     }
 
     func shifting(_ plan: ViewingPlan, movingPairID pairID: Int, to targetDay: LocalDay) -> ViewingPlan {
+        let days = scheduledDays(in: plan)
         guard let index = plan.orderedPairIDs.firstIndex(of: pairID),
-              let newStart = targetDay.adding(days: -index, calendar: calendar) else {
+              days.indices.contains(index),
+              let difference = dayDifference(from: days[index], to: targetDay) else {
             return plan
         }
-        var copy = plan
-        copy.startDay = newStart
-        return copy
+        return shifting(plan, byDays: difference)
     }
 
     func dayDifference(from first: LocalDay, to second: LocalDay) -> Int? {

@@ -2,6 +2,80 @@ import XCTest
 
 @MainActor
 final class ScheduleShiftUITests: XCTestCase {
+    func testCalendarShowsAutomaticDelayAndManualShiftUsesActualDates() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-schedule-editor", "--ui-test-auto-delay"]
+        app.launch()
+        let day5 = app.buttons["schedule.calendar.day.2026-09-05"].firstMatch
+        XCTAssertTrue(day5.waitForExistence(timeout: 5))
+        XCTAssertTrue(day5.label.contains("编号 5"), "Played history keeps its date")
+        XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-06"].firstMatch.label.contains("无计划"))
+        XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-07"].firstMatch.label.contains("编号 20"))
+        XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-08"].firstMatch.label.contains("编号 100"))
+        app.buttons["schedule.shift.pair.20"].tap()
+        app.buttons["schedule.calendar.day.2026-09-09"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-07"].firstMatch.label.contains("编号 5"))
+        XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-09"].firstMatch.label.contains("编号 20"))
+        XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-10"].firstMatch.label.contains("编号 100"))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "automatic-delay-calendar"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    func testViewingSettingChangesHomeGroupsImmediately() {
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-schedule-editor", "--ui-test-viewing-settings", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let settings = app.staticTexts["观看设置"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
+        let modePicker = app.buttons["settings.playbackMode"]
+        XCTAssertTrue(modePicker.waitForExistence(timeout: 3))
+        XCTAssertEqual(modePicker.value as? String, "严格")
+        XCTAssertFalse(app.switches["settings.normalPlaybackLooping"].exists)
+        modePicker.tap()
+        let normalMode = app.buttons["普通"]
+        XCTAssertTrue(normalMode.waitForExistence(timeout: 3))
+        normalMode.tap()
+        XCTAssertEqual(modePicker.value as? String, "普通")
+        let looping = app.switches["settings.normalPlaybackLooping"]
+        XCTAssertTrue(looping.exists)
+        XCTAssertEqual(looping.value as? String, "1")
+        looping.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        XCTAssertEqual(looping.value as? String, "0")
+        looping.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        XCTAssertEqual(looping.value as? String, "1")
+        let stepper = app.steppers["settings.dailyGroupCount"]
+        XCTAssertTrue(stepper.waitForExistence(timeout: 3))
+        XCTAssertEqual(stepper.value as? String, "3 组")
+        stepper.buttons["settings.dailyGroupCount-Decrement"].tap()
+        stepper.buttons["settings.dailyGroupCount-Decrement"].tap()
+        XCTAssertEqual(stepper.value as? String, "1 组")
+        stepper.buttons["settings.dailyGroupCount-Decrement"].tap()
+        XCTAssertEqual(stepper.value as? String, "1 组")
+        stepper.buttons["settings.dailyGroupCount-Increment"].tap()
+        XCTAssertEqual(stepper.value as? String, "2 组")
+        let settingsImage = XCTAttachment(screenshot: app.screenshot())
+        settingsImage.name = "viewing-settings"
+        settingsImage.lifetime = .keepAlways
+        add(settingsImage)
+        app.buttons["schedule.editor.close"].tap()
+        XCTAssertTrue(app.buttons["today.play.5.chinese"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["today.play.5.english"].exists)
+        app.swipeUp()
+        XCTAssertTrue(app.buttons["today.play.20.chinese"].exists)
+        XCTAssertTrue(app.buttons["today.play.20.english"].exists)
+        app.swipeUp()
+        XCTAssertFalse(app.buttons["today.play.100.chinese"].exists)
+        XCTAssertFalse(app.buttons["today.play.100.english"].exists)
+        let homeImage = XCTAttachment(screenshot: app.screenshot())
+        homeImage.name = "daily-groups-home"
+        homeImage.lifetime = .keepAlways
+        add(homeImage)
+    }
+
     func testScheduleEditorUsesOneCloseAndSaveFlow() throws {
         let app = XCUIApplication()
         app.launchArguments.append("--ui-test-schedule-editor")

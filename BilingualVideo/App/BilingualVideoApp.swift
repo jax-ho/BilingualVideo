@@ -8,7 +8,7 @@ struct BilingualVideoApp: App {
 
     init() {
         #if DEBUG
-        if UITestFixture.isShowingScheduleEditor {
+        if UITestFixture.isShowingScheduleEditor || UITestFixture.isStrictPlayback {
             _appModel = StateObject(wrappedValue: UITestFixture.makeScheduleEditorModel())
             return
         }

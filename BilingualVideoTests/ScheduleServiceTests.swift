@@ -2,6 +2,50 @@ import XCTest
 @testable import BilingualVideo
 
 final class ScheduleServiceTests: XCTestCase {
+    func testDailyWindowAdvancesOneGroupAndUsesEditedOrder() {
+        let calendar = testCalendar()
+        let service = ScheduleService(calendar: calendar)
+        let plan = ViewingPlan(
+            startDay: LocalDay(year: 2026, month: 9, day: 4),
+            orderedPairIDs: [20, 5, 100, 7, 9],
+            updatedAt: .distantPast
+        )
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 9, 4), dailyGroupCount: 3), [20, 5, 100])
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 9, 5), dailyGroupCount: 3), [5, 100, 7])
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 9, 5), dailyGroupCount: 1), [5])
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 9, 5), dailyGroupCount: 2), [5, 100])
+    }
+
+    func testDailyWindowTruncatesAtEndAndNeverLoopsOrStartsEarly() {
+        let service = ScheduleService(calendar: testCalendar())
+        let plan = ViewingPlan(
+            startDay: LocalDay(year: 2026, month: 9, day: 4),
+            orderedPairIDs: [1, 2, 3, 4], updatedAt: .distantPast
+        )
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 9, 3), dailyGroupCount: 3), [])
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 9, 6), dailyGroupCount: 3), [3, 4])
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 9, 7), dailyGroupCount: 3), [4])
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 9, 8), dailyGroupCount: 3), [])
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 9, 4), dailyGroupCount: Int.max), [1, 2, 3, 4])
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 9, 4), dailyGroupCount: 0), [])
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 9, 4), dailyGroupCount: -1), [])
+        var emptyPlan = plan
+        emptyPlan.orderedPairIDs = []
+        XCTAssertEqual(service.pairIDs(in: emptyPlan, on: testDate(2026, 9, 4), dailyGroupCount: 3), [])
+    }
+
+    func testDailyWindowAdvancesByCalendarDayAcrossDSTAndYearBoundary() {
+        let calendar = testCalendar(timeZoneIdentifier: "America/Los_Angeles")
+        let service = ScheduleService(calendar: calendar)
+        var plan = ViewingPlan(
+            startDay: LocalDay(year: 2026, month: 3, day: 7),
+            orderedPairIDs: [1, 2, 3, 4], updatedAt: .distantPast
+        )
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2026, 3, 9, hour: 0, calendar: calendar), dailyGroupCount: 3), [3, 4])
+        plan.startDay = LocalDay(year: 2026, month: 12, day: 31)
+        XCTAssertEqual(service.pairIDs(in: plan, on: testDate(2027, 1, 1, calendar: calendar), dailyGroupCount: 3), [2, 3, 4])
+    }
+
     func testLookupHasBoundariesAndNeverLoops() {
         let calendar = testCalendar()
         let service = ScheduleService(calendar: calendar)

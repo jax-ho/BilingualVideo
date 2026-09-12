@@ -4,7 +4,7 @@ import SwiftUI
 @preconcurrency import UIKit
 
 @MainActor
-private final class LocalVideoPlaybackSession {
+final class LocalVideoPlaybackSession {
     enum PlaybackError: LocalizedError {
         case missingFile
         case notPlayable
@@ -21,17 +21,57 @@ private final class LocalVideoPlaybackSession {
 
     let player = AVPlayer()
     var onFailure: ((String) -> Void)?
+    var onVideoChanged: ((PlayableVideo) -> Void)?
+    var onPlayback: ((PlayableVideo, Date) -> Void)?
+    var onProgress: ((PlayableVideo, Double) -> Void)?
+    var onPlayingChanged: ((Bool) -> Void)?
+    var onEnded: ((PlayableVideo) -> Void)?
+    var nextVideo: ((PlayableVideo) throws -> PlayableVideo?)?
+    var allowsAutomaticAdvance = true
+    private(set) var currentVideo: PlayableVideo?
 
     private var statusObservation: NSKeyValueObservation?
+    private var playbackStatusObservation: NSKeyValueObservation?
+    private var playbackTimeObserver: Any?
+    private var playingSince: Date?
     private var failedToEndObserver: NSObjectProtocol?
     private var didPlayToEndObserver: NSObjectProtocol?
     private var loadID = UUID()
+    private var continuationTask: Task<Void, Never>?
+    private var continuationID: UUID?
 
-    func prepare(url: URL) async throws {
+    func prepare(video: PlayableVideo, resumeAt seconds: Double = 0) async throws {
+        try Task.checkCancellation()
         stop()
+        try await load(video: video)
+        if seconds > 0 {
+            let expectedLoadID = loadID
+            guard let asset = player.currentItem?.asset else { throw PlaybackError.notPlayable }
+            let duration = try await asset.load(.duration).seconds
+            try Task.checkCancellation()
+            guard loadID == expectedLoadID else { throw CancellationError() }
+            guard seconds.isFinite, duration.isFinite, seconds <= duration else {
+                throw PlaybackError.notPlayable
+            }
+            // A checkpoint at the final frame must still reach the natural-end
+            // observer after a restart, rather than remain stuck at the end.
+            let restored = await player.seek(
+                to: CMTime(seconds: min(seconds, max(0, duration - 0.01)), preferredTimescale: 600),
+                toleranceBefore: .zero, toleranceAfter: .zero
+            )
+            try Task.checkCancellation()
+            guard loadID == expectedLoadID else { throw CancellationError() }
+            guard restored else { throw PlaybackError.notPlayable }
+        }
+    }
+
+    private func load(video: PlayableVideo) async throws {
+        try Task.checkCancellation()
+        resetItem()
 
         let currentLoadID = UUID()
         loadID = currentLoadID
+        let url = video.url
 
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw PlaybackError.missingFile
@@ -48,6 +88,8 @@ private final class LocalVideoPlaybackSession {
         let item = AVPlayerItem(asset: asset)
         observe(item: item, loadID: currentLoadID)
         player.replaceCurrentItem(with: item)
+        currentVideo = video
+        onVideoChanged?(video)
     }
 
     func play() {
@@ -59,9 +101,24 @@ private final class LocalVideoPlaybackSession {
     }
 
     func stop() {
+        continuationID = nil
+        continuationTask?.cancel()
+        continuationTask = nil
+        resetItem()
+    }
+
+    private func resetItem() {
+        finishPlaying(at: Date())
         loadID = UUID()
+        currentVideo = nil
         statusObservation?.invalidate()
         statusObservation = nil
+        playbackStatusObservation?.invalidate()
+        playbackStatusObservation = nil
+        if let playbackTimeObserver {
+            player.removeTimeObserver(playbackTimeObserver)
+            self.playbackTimeObserver = nil
+        }
 
         if let failedToEndObserver {
             NotificationCenter.default.removeObserver(failedToEndObserver)
@@ -73,11 +130,45 @@ private final class LocalVideoPlaybackSession {
         }
 
         player.pause()
+        onPlayingChanged?(false)
         player.replaceCurrentItem(with: nil)
         try? AVAudioSession.sharedInstance().setActive(
             false,
             options: .notifyOthersOnDeactivation
         )
+    }
+
+    private func advanceAfterEnd() {
+        guard allowsAutomaticAdvance, continuationTask == nil, let currentVideo else { return }
+        do {
+            guard let next = try nextVideo?(currentVideo) else { return }
+            let expectedID = UUID()
+            continuationID = expectedID
+            continuationTask = Task { [weak self] in
+                guard let self, self.continuationID == expectedID else { return }
+                defer {
+                    if self.continuationID == expectedID {
+                        self.continuationID = nil
+                        self.continuationTask = nil
+                    }
+                }
+                do {
+                    try await self.load(video: next)
+                    try Task.checkCancellation()
+                    guard self.continuationID == expectedID else { return }
+                    if self.allowsAutomaticAdvance {
+                        self.play()
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard self.continuationID == expectedID else { return }
+                    self.onFailure?(error.localizedDescription)
+                }
+            }
+        } catch {
+            onFailure?(error.localizedDescription)
+        }
     }
 
     private func configureAudioSession() {
@@ -87,6 +178,35 @@ private final class LocalVideoPlaybackSession {
     }
 
     private func observe(item: AVPlayerItem, loadID: UUID) {
+        playbackStatusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self, weak item] player, _ in
+            let status = player.timeControlStatus
+            let timestamp = Date()
+            Task { @MainActor [weak self, weak item] in
+                guard let self, let item, self.loadID == loadID,
+                      self.player.currentItem === item else { return }
+                self.onPlayingChanged?(status == .playing)
+                if status == .playing, item.status == .readyToPlay, let video = self.currentVideo {
+                    self.playingSince = timestamp
+                    self.onPlayback?(video, timestamp)
+                } else {
+                    self.finishPlaying(at: timestamp)
+                }
+            }
+        }
+        // A video can span midnight without changing its playing state.
+        playbackTimeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main
+        ) { [weak self, weak item] _ in
+            let timestamp = Date()
+            Task { @MainActor [weak self, weak item] in
+                guard let self, let item, self.loadID == loadID,
+                      self.player.currentItem === item, item.status == .readyToPlay,
+                      self.player.timeControlStatus == .playing, self.player.rate > 0,
+                      let video = self.currentVideo else { return }
+                self.onPlayback?(video, timestamp)
+                self.onProgress?(video, self.player.currentTime().seconds)
+            }
+        }
         statusObservation = item.observe(\.status, options: [.new]) { [weak self, weak item] _, _ in
             guard let item, item.status == .failed else { return }
             let message = item.error?.localizedDescription ?? PlaybackError.notPlayable.localizedDescription
@@ -125,9 +245,20 @@ private final class LocalVideoPlaybackSession {
                       let item,
                       self.loadID == loadID,
                       self.player.currentItem === item else { return }
-                self.player.seek(to: .zero)
+                if let onEnded = self.onEnded, let video = self.currentVideo {
+                    onEnded(video)
+                } else {
+                    self.advanceAfterEnd()
+                }
             }
         }
+    }
+
+    private func finishPlaying(at date: Date) {
+        guard let started = playingSince, let video = currentVideo else { return }
+        playingSince = nil
+        // The paused instant itself is not playback (notably exactly midnight).
+        onPlayback?(video, max(started, date.addingTimeInterval(-0.000001)))
     }
 }
 
@@ -137,6 +268,8 @@ private final class LocalVideoPlaybackSession {
 struct NativeVideoPlayerPresenter: UIViewControllerRepresentable {
     @Binding var video: PlayableVideo?
     let scenePhase: ScenePhase
+    let nextVideo: (PlayableVideo) throws -> PlayableVideo?
+    let onPlayback: (PlayableVideo, Date) -> Void
     let onDismiss: () -> Void
     let onFailure: (String) -> Void
 
@@ -157,6 +290,8 @@ struct NativeVideoPlayerPresenter: UIViewControllerRepresentable {
             video: video,
             videoBinding: $video,
             scenePhase: scenePhase,
+            nextVideo: nextVideo,
+            onPlayback: onPlayback,
             onDismiss: onDismiss,
             onFailure: onFailure
         )
@@ -188,6 +323,10 @@ struct NativeVideoPlayerPresenter: UIViewControllerRepresentable {
             session.onFailure = { [weak self] message in
                 self?.handlePlaybackFailure(message)
             }
+            session.onVideoChanged = { [weak self] video in
+                self?.activeVideoID = video.id
+                self?.videoBinding?.wrappedValue = video
+            }
         }
 
         func update(
@@ -195,6 +334,8 @@ struct NativeVideoPlayerPresenter: UIViewControllerRepresentable {
             video: PlayableVideo?,
             videoBinding: Binding<PlayableVideo?>,
             scenePhase: ScenePhase,
+            nextVideo: @escaping (PlayableVideo) throws -> PlayableVideo?,
+            onPlayback: @escaping (PlayableVideo, Date) -> Void,
             onDismiss: @escaping () -> Void,
             onFailure: @escaping (String) -> Void
         ) {
@@ -202,7 +343,10 @@ struct NativeVideoPlayerPresenter: UIViewControllerRepresentable {
             self.videoBinding = videoBinding
             self.onDismiss = onDismiss
             self.onFailure = onFailure
+            session.nextVideo = nextVideo
+            session.onPlayback = onPlayback
             isSceneActive = scenePhase == .active
+            session.allowsAutomaticAdvance = isSceneActive && !dismissalInFlight
 
             guard isSceneActive else {
                 session.pause()
@@ -243,6 +387,8 @@ struct NativeVideoPlayerPresenter: UIViewControllerRepresentable {
         ) {
             guard self.playerViewController === playerViewController else { return }
             dismissalInFlight = true
+            session.allowsAutomaticAdvance = false
+            session.pause()
             coordinator.animate(alongsideTransition: nil) { [weak self] context in
                 // The transition context is valid only for this callback. Copy the
                 // value before hopping back to MainActor.
@@ -252,6 +398,7 @@ struct NativeVideoPlayerPresenter: UIViewControllerRepresentable {
                     guard !transitionWasCancelled else {
                         if self.playerViewController === playerViewController {
                             self.dismissalInFlight = false
+                            self.session.allowsAutomaticAdvance = self.isSceneActive
                         }
                         return
                     }
@@ -284,7 +431,7 @@ struct NativeVideoPlayerPresenter: UIViewControllerRepresentable {
             loadTask = Task { [weak self, weak presenter] in
                 guard let self else { return }
                 do {
-                    try await self.session.prepare(url: video.url)
+                    try await self.session.prepare(video: video)
                     try Task.checkCancellation()
                     guard self.activeVideoID == expectedVideoID else { return }
                     guard self.isSceneActive else {
@@ -331,6 +478,8 @@ struct NativeVideoPlayerPresenter: UIViewControllerRepresentable {
         private func handlePlaybackFailure(_ message: String) {
             guard !dismissalInFlight else { return }
             dismissalInFlight = true
+            session.allowsAutomaticAdvance = false
+            session.pause()
             let failureHandler = onFailure
             let controller = playerViewController
 
@@ -349,6 +498,8 @@ struct NativeVideoPlayerPresenter: UIViewControllerRepresentable {
         private func dismissPresentedPlayer(notifyDismiss: Bool) {
             guard !dismissalInFlight else { return }
             dismissalInFlight = true
+            session.allowsAutomaticAdvance = false
+            session.pause()
             loadTask?.cancel()
             loadTask = nil
 
