@@ -49,6 +49,8 @@ final class AppModel: ObservableObject {
         bootstrap()
     }
 
+    var currentDate: Date { now() }
+
     var missingPlannedPairIDs: [Int] {
         guard let savedPlan else { return [] }
         let availableIDs = Set(scanResult.pairs.map(\.id))

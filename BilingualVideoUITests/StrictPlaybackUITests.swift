@@ -17,7 +17,7 @@ final class StrictPlaybackUITests: XCTestCase {
             let result = XCTWaiter.wait(
                 for: [XCTNSPredicateExpectation(predicate: rotated, object: nil)], timeout: 5
             )
-            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = "home-orientation-\(orientation.rawValue)"
             screenshot.lifetime = .keepAlways
             add(screenshot)
@@ -30,6 +30,7 @@ final class StrictPlaybackUITests: XCTestCase {
         let app = try launchFixture()
         let entry = app.buttons["today.strict.play"]
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["today.strict.resumeSummary"].exists)
         XCTAssertFalse(app.buttons["today.play.5.chinese"].exists)
         XCTAssertEqual(app.buttons.matching(identifier: "today.strict.play").count, 1)
         entry.tap()
@@ -49,18 +50,20 @@ final class StrictPlaybackUITests: XCTestCase {
         // A horizontal drag on the video must not seek it while paused.
         app.otherElements["strict.surface"].firstMatch.swipeRight()
         XCTAssertEqual(seconds(in: app), paused)
-        let image = XCTAttachment(screenshot: app.screenshot())
+        let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         image.name = "strict-paused-no-seek-controls"
         image.lifetime = .keepAlways
         add(image)
         app.buttons["strict.close"].tap()
         XCTAssertTrue(entry.waitForExistence(timeout: 3))
         XCTAssertEqual(entry.label, "继续观看")
+        assertReadOnlyResumeSummary(in: app, position: paused)
         app.terminate()
         app.launchArguments.append("--ui-test-preserve")
         app.launch()
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
         XCTAssertEqual(entry.label, "继续观看")
+        assertReadOnlyResumeSummary(in: app, position: paused)
         entry.tap()
         XCTAssertTrue(pause.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(seconds(in: app), paused)
@@ -94,7 +97,7 @@ final class StrictPlaybackUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(finished.waitForExistence(timeout: 5))
         XCTAssertFalse(entry.exists)
-        let image = XCTAttachment(screenshot: app.screenshot())
+        let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         image.name = "strict-day-completed-after-relaunch"
         image.lifetime = .keepAlways
         add(image)
@@ -150,6 +153,10 @@ final class StrictPlaybackUITests: XCTestCase {
         app.buttons["schedule.editor.save"].tap()
         let confirm = app.buttons["确认保存"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 3))
+        let todayImpact = app.staticTexts["schedule.preview.todayImpact"]
+        XCTAssertTrue(todayImpact.exists)
+        XCTAssertEqual(todayImpact.label, "今天的观看内容会改变")
+        XCTAssertTrue(app.staticTexts["保存后，严格模式的今日进度会重置，从第一个视频重新开始。"].exists)
         confirm.tap()
         XCTAssertTrue(entry.waitForExistence(timeout: 3))
         XCTAssertEqual(entry.label, "开始观看")
@@ -157,7 +164,7 @@ final class StrictPlaybackUITests: XCTestCase {
         XCTAssertTrue(app.buttons["strict.pause"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["strict.currentEpisode"].label.contains("编号 20 · 中文"))
         XCTAssertLessThanOrEqual(seconds(in: app), 2)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "changed-today-plan-starts-new-first-episode"
         screenshot.lifetime = .keepAlways
         add(screenshot)
@@ -253,7 +260,7 @@ final class StrictPlaybackUITests: XCTestCase {
         reset.tap()
         let confirm = app.buttons["确认重置"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 3))
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "parent-manual-reset-confirmation"
         screenshot.lifetime = .keepAlways
         add(screenshot)
@@ -295,6 +302,17 @@ final class StrictPlaybackUITests: XCTestCase {
     private func seconds(in app: XCUIApplication) -> Int {
         let label = app.staticTexts["strict.position"].label
         return Int(label.filter(\.isNumber)) ?? -1
+    }
+
+    private func assertReadOnlyResumeSummary(in app: XCUIApplication, position: Int) {
+        let summary = app.descendants(matching: .any)["today.strict.resumeSummary"].firstMatch
+        XCTAssertTrue(summary.waitForExistence(timeout: 3))
+        XCTAssertTrue(summary.label.contains("接着看：编号 5 · 中文"))
+        XCTAssertTrue(summary.label.contains("今天第 1 / 2 个视频"))
+        XCTAssertTrue(summary.label.contains("已播放 \(position) 秒"))
+        XCTAssertFalse(app.buttons["today.strict.resumeSummary"].exists, "The resume summary must not become another playback entry")
+        XCTAssertEqual(app.buttons.matching(identifier: "today.strict.play").count, 1)
+        XCTAssertEqual(app.sliders.count, 0)
     }
 
     private func waitForSeconds(_ seconds: TimeInterval) {

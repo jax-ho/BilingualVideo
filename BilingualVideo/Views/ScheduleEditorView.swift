@@ -23,52 +23,59 @@ struct ScheduleEditorView: View {
     var body: some View {
         List {
             Section {
-                Text("扫描、顺序调整和日期修改只会改变候选计划。点击右上角“保存”后才会覆盖当前计划。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(draft == nil ? "尚未创建计划" : (hasUnsavedChanges ? "有未保存的更改" : "与当前计划一致"), systemImage: hasUnsavedChanges ? "pencil.circle" : "checkmark.circle")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.accent)
+                        .accessibilityIdentifier("schedule.draft.status")
+                    Text("调整后，点右上角“保存”生效。")
+                        .font(.subheadline).foregroundStyle(AppTheme.muted)
+                }
+                .padding(.vertical, 8)
             }
+            .listRowBackground(AppTheme.sage)
 
-            if generationAttempted, !appModel.scanResult.issues.isEmpty {
+            if generationAttempted, !appModel.scanResult.isValidForGeneration {
                 Section("无法生成计划") {
+                    if appModel.scanResult.pairs.isEmpty {
+                        Text("没有完整的中英文视频。请先到视频资源中添加。")
+                    }
                     ForEach(appModel.scanResult.issues) { issue in
                         IssueRow(issue: issue)
                     }
                     Text("当前已保存计划没有改变。")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AppTheme.muted)
                 }
+                .listRowBackground(AppTheme.surface)
             }
 
             if draft == nil {
-                Section("创建候选计划") {
+                Section("开始安排观看") {
+                    Text("先在“视频资源”中准备中英文视频，再选择开始日期。")
+                        .font(.subheadline).foregroundStyle(AppTheme.muted)
                     DatePicker("开始日期", selection: $chosenStartDate, displayedComponents: .date)
                     Button {
                         generateCandidate()
                     } label: {
-                        Label("扫描并生成计划", systemImage: "calendar.badge.plus")
+                        Label("用现有视频创建计划", systemImage: "calendar.badge.plus")
                     }
+                    .disabled(appModel.scanResult.pairs.isEmpty)
                 }
+                .listRowBackground(AppTheme.surface)
             } else {
                 planSummarySection
                 orderSection
                 calendarSection
             }
         }
+        .springList()
         .environment(\.editMode, .constant(.active))
         .navigationTitle("计划编辑")
+        .toolbarBackground(AppTheme.canvas, for: .navigationBar)
         .toolbar {
             if draft != nil {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        if hasUnsavedChanges {
-                            isShowingRegenerateConfirmation = true
-                        } else {
-                            generateCandidate()
-                        }
-                    } label: {
-                        Label("重新生成", systemImage: "arrow.triangle.2.circlepath")
-                    }
-
                     Button("保存") {
                         isShowingSavePreview = true
                     }
@@ -84,16 +91,16 @@ struct ScheduleEditorView: View {
             appModel.refreshLibrary()
         }
         .confirmationDialog(
-            "按当前资源重新生成候选计划？",
+            "用现有视频重新生成计划？",
             isPresented: $isShowingRegenerateConfirmation,
             titleVisibility: .visible
         ) {
-            Button("重新生成候选计划", role: .destructive) {
+            Button("重新生成", role: .destructive) {
                 generateCandidate()
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("这只会重置尚未保存的候选顺序；已保存计划要等你再次确认保存后才会改变。")
+            Text("按现有视频编号重新安排顺序和日期，替换当前草稿。点击保存后才会改变孩子的观看计划。")
         }
         .sheet(isPresented: $isShowingSavePreview, onDismiss: finishSavingIfNeeded) {
             if let draft {
@@ -101,6 +108,9 @@ struct ScheduleEditorView: View {
                     oldPlan: appModel.savedPlan,
                     newPlan: draft,
                     calendar: appModel.scheduleService.calendar,
+                    changesToday: appModel.todayStates.map(\.id) != appModel.scheduleService.pairIDs(
+                        in: draft, on: appModel.currentDate, dailyGroupCount: appModel.dailyGroupCount
+                    ),
                     onCancel: { isShowingSavePreview = false },
                     onSave: saveDraft
                 )
@@ -120,21 +130,25 @@ struct ScheduleEditorView: View {
     }
 
     private var planSummarySection: some View {
-        Section("整条计划") {
+        Section("整体调整日期") {
             DatePicker("开始日期", selection: draftDateBinding, displayedComponents: .date)
 
             HStack {
                 Button {
                     shiftDraft(by: -1)
                 } label: {
-                    Label("前移一天", systemImage: "arrow.left")
+                    Label("提前一天", systemImage: "arrow.left")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(AppTheme.sage, in: RoundedRectangle(cornerRadius: 12))
                 }
                 .accessibilityIdentifier("schedule.shift.previous")
                 Spacer()
                 Button {
                     shiftDraft(by: 1)
                 } label: {
-                    Label("后移一天", systemImage: "arrow.right")
+                    Label("推迟一天", systemImage: "arrow.right")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(AppTheme.sage, in: RoundedRectangle(cornerRadius: 12))
                 }
                 .accessibilityIdentifier("schedule.shift.next")
             }
@@ -147,6 +161,7 @@ struct ScheduleEditorView: View {
                 }
             }
         }
+        .listRowBackground(AppTheme.surface)
     }
 
     private var orderSection: some View {
@@ -165,12 +180,19 @@ struct ScheduleEditorView: View {
                     copy.orderedPairIDs.move(fromOffsets: source, toOffset: destination)
                     draft = copy
                 }
+                Button {
+                    isShowingRegenerateConfirmation = true
+                } label: {
+                    Label("用现有视频重新生成计划…", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .accessibilityIdentifier("schedule.regenerate")
             }
         } header: {
             Text("播放顺序")
         } footer: {
             Text("拖动右侧把手调整顺序；中英文始终作为一组移动。")
         }
+        .listRowBackground(AppTheme.surface)
     }
 
     private var calendarSection: some View {
@@ -192,10 +214,11 @@ struct ScheduleEditorView: View {
                 )
             }
         } header: {
-            Text("调整某组播放日期")
+            Text("指定某天从哪组开始")
         } footer: {
-            Text("先点一个视频组，再点它要播放的日期。其他视频组保持原顺序，并一起前移或后移。")
+            Text("日历编号表示当天的第一组。调整时，整条计划一起移动，播放顺序不变。")
         }
+        .listRowBackground(AppTheme.surface)
     }
 
     private var draftDateBinding: Binding<Date> {
@@ -304,20 +327,22 @@ private struct PairOrderRow: View {
     let moveDown: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("编号 \(pairID)")
                 .font(.headline)
             if let pair {
                 Text("中文：\(pair.chineseFileName)　英文：\(pair.englishFileName)")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.muted)
             } else {
                 Label("当前资源缺失", systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(AppTheme.warning)
             }
         }
+        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("schedule.order.pair.\(pairID)")
         .accessibilityAction(named: "上移") { moveUp() }
         .accessibilityAction(named: "下移") { moveDown() }
     }
@@ -331,10 +356,11 @@ private struct PlanCalendarShiftView: View {
 
     @State private var selectedPairID: Int?
     @State private var adjustmentMessage: String?
+    @State private var adjustmentSucceeded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("第一步：选择视频组")
+        VStack(alignment: .leading, spacing: 20) {
+            Text("1. 选择当天的第一组")
                 .font(.subheadline.bold())
 
             ScrollView(.horizontal, showsIndicators: true) {
@@ -350,11 +376,11 @@ private struct PlanCalendarShiftView: View {
                                 systemImage: isSelected ? "checkmark.circle.fill" : "circle"
                             )
                             .font(.headline)
-                            .foregroundStyle(isSelected ? Color.white : Color.accentColor)
+                            .foregroundStyle(isSelected ? AppTheme.actionText : AppTheme.accent)
                             .padding(.horizontal, 13)
                             .padding(.vertical, 9)
                             .background(
-                                isSelected ? Color.accentColor : Color.accentColor.opacity(0.15),
+                                isSelected ? AppTheme.actionFill : AppTheme.sage,
                                 in: Capsule()
                             )
                         }
@@ -369,18 +395,18 @@ private struct PlanCalendarShiftView: View {
 
             Text(selectionInstruction)
                 .font(.footnote)
-                .foregroundStyle(selectedPairID == nil ? Color.secondary : Color.accentColor)
+                .foregroundStyle(selectedPairID == nil ? AppTheme.muted : AppTheme.accent)
 
             if let adjustmentMessage {
-                Label(adjustmentMessage, systemImage: "checkmark.circle.fill")
+                Label(adjustmentMessage, systemImage: adjustmentSucceeded ? "checkmark.circle.fill" : "info.circle")
                     .font(.footnote)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(adjustmentSucceeded ? AppTheme.accent : AppTheme.muted)
                     .accessibilityIdentifier("schedule.shift.result")
             }
 
             Divider()
 
-            Text("第二步：点目标日期")
+            Text("2. 选择这一天")
                 .font(.subheadline.bold())
 
             HStack {
@@ -391,9 +417,10 @@ private struct PlanCalendarShiftView: View {
                         .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.borderless)
+                .frame(minWidth: 44, minHeight: 44)
                 Spacer()
                 Text(monthTitle)
-                    .font(.title3.bold())
+                    .font(.system(.title2, design: .rounded, weight: .semibold))
                 Spacer()
                 Button {
                     moveMonth(by: 1)
@@ -402,54 +429,60 @@ private struct PlanCalendarShiftView: View {
                         .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.borderless)
+                .frame(minWidth: 44, minHeight: 44)
             }
 
-            DatePicker("查看日期", selection: $focusDate, displayedComponents: .date)
+            DatePicker("跳到日期", selection: $focusDate, displayedComponents: .date)
                 .datePickerStyle(.compact)
 
             // A month is at most six rows. Measure them eagerly so the enclosing
             // List gets a stable row height even when the calendar starts offscreen.
-            Grid(horizontalSpacing: 6, verticalSpacing: 6) {
-                GridRow {
-                    ForEach(Array(rotatedWeekdaySymbols.enumerated()), id: \.offset) { _, symbol in
-                        Text(symbol)
-                            .font(.caption.bold())
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-
-                let cells = monthCells
-                ForEach(Array(stride(from: 0, to: cells.count, by: 7)), id: \.self) { rowStart in
+            ScrollView(.horizontal) {
+                Grid(horizontalSpacing: 6, verticalSpacing: 6) {
                     GridRow {
-                        ForEach(0..<7) { column in
-                            let index = rowStart + column
-                            if index < cells.count, let day = cells[index] {
-                                CalendarDaySelectionCell(
-                                    day: day,
-                                    pairID: pairID(on: day),
-                                    accessibilityDate: format(day),
-                                    hasSelectedPair: selectedPairID != nil,
-                                    onSelect: { select(day: day) }
-                                )
-                            } else {
-                                Color.clear
-                                    .frame(maxWidth: .infinity, minHeight: 68)
-                                    .accessibilityHidden(true)
+                        ForEach(Array(rotatedWeekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                            Text(symbol)
+                                .font(.caption.bold())
+                                .foregroundStyle(AppTheme.muted)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+
+                    let cells = monthCells
+                    ForEach(Array(stride(from: 0, to: cells.count, by: 7)), id: \.self) { rowStart in
+                        GridRow {
+                            ForEach(0..<7) { column in
+                                let index = rowStart + column
+                                if index < cells.count, let day = cells[index] {
+                                    CalendarDaySelectionCell(
+                                        day: day,
+                                        pairID: pairID(on: day),
+                                        accessibilityDate: format(day),
+                                        hasSelectedPair: selectedPairID != nil,
+                                        onSelect: { select(day: day) }
+                                    )
+                                } else {
+                                    Color.clear
+                                        .frame(minWidth: 44, maxWidth: .infinity, minHeight: 68)
+                                        .accessibilityHidden(true)
+                                }
                             }
                         }
                     }
                 }
+                .containerRelativeFrame(.horizontal)
+                .frame(minWidth: 344)
             }
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 6)
     }
 
     private var selectionInstruction: String {
         if let selectedPairID {
-            return "已选择编号 \(selectedPairID)。现在点日历里它要播放的日期。"
+            return "已选编号 \(selectedPairID)。点一个日期，让这一天从它开始。"
         }
-        return "点一下编号即可选择，不需要长按或拖动。"
+        return "先选一组，再点日期；整条计划会一起移动。"
     }
 
     private var monthStart: Date {
@@ -486,12 +519,14 @@ private struct PlanCalendarShiftView: View {
     private func select(day: LocalDay) {
         guard let selectedPairID else {
             adjustmentMessage = "请先选择一个视频组。"
+            adjustmentSucceeded = false
             return
         }
 
         let movement = movementDescription(for: selectedPairID, to: day)
         guard onMovePair(selectedPairID, day) else { return }
-        adjustmentMessage = "已将编号 \(selectedPairID) 安排到 \(shortFormat(day))；\(movement)"
+        adjustmentSucceeded = true
+        adjustmentMessage = "\(shortFormat(day)) 从编号 \(selectedPairID) 开始；\(movement)"
         self.selectedPairID = nil
     }
 
@@ -552,18 +587,18 @@ private struct CalendarDaySelectionCell: View {
                         .font(.caption2)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 68)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            .frame(minWidth: 44, maxWidth: .infinity, minHeight: 68)
+            .background(pairID == nil ? AppTheme.canvas : AppTheme.sage, in: RoundedRectangle(cornerRadius: 12))
             .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(hasSelectedPair ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(hasSelectedPair ? AppTheme.accent : AppTheme.line.opacity(0.5), lineWidth: 1)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(dayIdentifier)
-        .accessibilityLabel("\(accessibilityDate)\(pairID.map { "，编号 \($0)" } ?? "，无计划")")
-        .accessibilityHint(hasSelectedPair ? "把已选择的视频组安排到这一天" : "请先选择一个视频组")
+        .accessibilityLabel("\(accessibilityDate)\(pairID.map { "，当天第一组为编号 \($0)" } ?? "，无计划")")
+        .accessibilityHint(hasSelectedPair ? "让这一天从已选视频组开始，整条计划一起移动" : "请先选择一个视频组")
     }
 
     private var dayIdentifier: String {
@@ -575,25 +610,40 @@ private struct SavePlanPreviewView: View {
     let oldPlan: ViewingPlan?
     let newPlan: ViewingPlan
     let calendar: Calendar
+    let changesToday: Bool
     let onCancel: () -> Void
     let onSave: () -> Void
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Label(changesToday ? "今天的观看内容会改变" : "今天的观看内容不变", systemImage: changesToday ? "exclamationmark.circle" : "checkmark.circle")
+                        .font(.headline)
+                        .foregroundStyle(changesToday ? AppTheme.warning : AppTheme.accent)
+                        .accessibilityIdentifier("schedule.preview.todayImpact")
+                    Text(changesToday
+                         ? "保存后，严格模式的今日进度会重置，从第一个视频重新开始。"
+                         : "已记录的今日播放进度会保留。")
+                        .font(.subheadline).foregroundStyle(AppTheme.muted)
+                }
+                .listRowBackground(changesToday ? AppTheme.wheat : AppTheme.sage)
                 Section("变更预览") {
                     LabeledContent("原开始日期", value: oldPlan.map { format($0.startDay) } ?? "尚无计划")
                     LabeledContent("新开始日期", value: format(newPlan.startDay))
                     LabeledContent("原视频组数", value: "\(oldPlan?.orderedPairIDs.count ?? 0)")
                     LabeledContent("新视频组数", value: "\(newPlan.orderedPairIDs.count)")
                 }
+                .listRowBackground(AppTheme.surface)
 
-                Section("新计划完整顺序") {
+                Section("每天从这里开始") {
                     ForEach(ScheduleService(calendar: calendar).preview(newPlan)) { entry in
                         LabeledContent(format(entry.day), value: "编号 \(entry.pairID)")
                     }
                 }
+                .listRowBackground(AppTheme.surface)
             }
+            .springList()
             .navigationTitle("保存计划")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

@@ -20,6 +20,8 @@ struct BilingualVideoApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(appModel)
+                .tint(AppTheme.accent)
+                .foregroundStyle(AppTheme.ink)
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {

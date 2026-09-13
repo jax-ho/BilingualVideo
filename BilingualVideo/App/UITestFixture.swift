@@ -31,7 +31,8 @@ enum UITestFixture {
             )
             try directories.prepareForLaunch()
 
-            for pairID in [5, 20, 100] {
+            let isEmptyLibrary = ProcessInfo.processInfo.arguments.contains("--ui-test-empty-library")
+            for pairID in isEmptyLibrary ? [] : [5, 20, 100] {
                 for language in VideoLanguage.allCases {
                     let sample = ProcessInfo.processInfo.environment["UI_TEST_VIDEO_BASE64"]
                         .flatMap { Data(base64Encoded: $0) } ?? Data([0x00])
@@ -67,6 +68,7 @@ enum UITestFixture {
             if isStrictPlayback {
                 model.setDailyGroupCount(1)
             }
+            if isEmptyLibrary { return model }
             guard let plan = model.makeCandidate(startDate: startDate) else {
                 fatalError("Unable to create schedule editor UI-test plan")
             }

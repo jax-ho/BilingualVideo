@@ -149,6 +149,8 @@ final class StrictVideoPlayerModel: ObservableObject {
 struct StrictVideoPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityVoiceOverEnabled) private var isVoiceOverEnabled
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @StateObject private var model: StrictVideoPlayerModel
     @State private var showsControls = true
     @State private var hideControlsTask: Task<Void, Never>?
@@ -162,11 +164,19 @@ struct StrictVideoPlayerView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if model.isFinished {
-                Text("今天的视频已经播放完毕")
-                    .font(.largeTitle.bold())
-                    .accessibilityIdentifier("strict.finished")
+                messageScreen(
+                    title: "今天的视频已经播放完毕",
+                    detail: "今天就看到这里，明天再来吧。",
+                    icon: "checkmark.circle",
+                    identifier: "strict.finished"
+                )
             } else if let failure = model.failure {
-                Text(failure).font(.title2).padding(48)
+                messageScreen(
+                    title: "视频暂时无法播放",
+                    detail: "\(failure)\n\n请返回首页，让家长帮忙检查。",
+                    icon: "exclamationmark.circle",
+                    identifier: "strict.failure"
+                )
             } else {
                 StrictVideoSurface(player: model.session.player)
                     .ignoresSafeArea()
@@ -176,47 +186,16 @@ struct StrictVideoPlayerView: View {
                     .accessibilityIdentifier("strict.surface")
                     .accessibilityAction(named: "显示播放控制") { revealControls() }
                 if !model.isReady { ProgressView().tint(.white) }
-            }
 
-            if showsControls || !model.isPlaying || model.isFinished || model.failure != nil {
-                VStack {
-                    HStack {
-                        Button {
-                            model.close()
-                            dismiss()
-                        } label: { Label("关闭", systemImage: "xmark") }
-                        .accessibilityIdentifier("strict.close")
-                        Spacer()
-                        if let request = model.request {
-                            Text("第 \(request.index + 1) / \(request.episodeCount) 集 · 编号 \(request.video.pairID) · \(request.video.language.displayName)")
-                                .accessibilityIdentifier("strict.currentEpisode")
-                        }
-                    }
-                    Spacer()
-                    if model.request != nil, model.failure == nil {
-                        HStack(spacing: 24) {
-                            Button {
-                                model.togglePause()
-                                revealControls()
-                            } label: {
-                                Label(model.isPlaying ? "暂停" : "继续播放",
-                                      systemImage: model.isPlaying ? "pause.fill" : "play.fill")
-                            }
-                            .disabled(!model.isReady)
-                            .accessibilityIdentifier("strict.pause")
-                            Text("已播放 \(Int(max(0, model.position))) 秒")
-                                .monospacedDigit()
-                                .accessibilityIdentifier("strict.position")
-                        }
-                    }
+                if showsControls || isVoiceOverEnabled || !model.isPlaying {
+                    controlsOverlay
                 }
-                .font(.title3.bold())
-                .buttonStyle(.bordered)
-                .tint(.white)
-                .padding(28)
             }
         }
         .foregroundStyle(.white)
+        .font(.title3.bold())
+        .buttonStyle(.bordered)
+        .tint(.white)
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .interactiveDismissDisabled()
@@ -230,6 +209,7 @@ struct StrictVideoPlayerView: View {
             if playing { revealControls() }
         }
         .onChange(of: model.shouldDismiss) { _, value in if value { dismiss() } }
+        .onChange(of: isVoiceOverEnabled) { _, _ in revealControls() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { model.close(); dismiss() }
         }
@@ -240,9 +220,120 @@ struct StrictVideoPlayerView: View {
         }
     }
 
+    private var headerControls: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Button {
+                        model.close()
+                        dismiss()
+                    } label: { Label("返回", systemImage: "chevron.backward") }
+                    .accessibilityIdentifier("strict.close")
+                    Spacer()
+                    if model.failure == nil, !model.isFinished {
+                        Text("进度会自动保留")
+                            .font(.footnote)
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+                }
+                if let request = model.request {
+                    Text("第 \(request.index + 1) / \(request.episodeCount) 集 · 编号 \(request.video.pairID) · \(request.video.language.displayName)")
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("strict.currentEpisode")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 28)
+            .padding(.top, 24)
+            .padding(.bottom, 12)
+            .background(Color.black.opacity(0.82).ignoresSafeArea(edges: .top))
+            LinearGradient(
+                colors: [.black.opacity(0.82), .clear],
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: 28)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var controlsOverlay: some View {
+        VStack(spacing: 0) {
+            headerControls
+            Spacer(minLength: 24)
+            if model.request != nil {
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.82)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .frame(height: 28)
+                    .allowsHitTesting(false)
+                    Group {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            VStack(spacing: 16) { playbackControls }
+                        } else {
+                            HStack(spacing: 24) { playbackControls }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 28)
+                    .padding(.top, 12)
+                    .padding(.bottom, 24)
+                    .background(Color.black.opacity(0.82).ignoresSafeArea(edges: .bottom))
+                }
+            }
+        }
+    }
+
+    private func messageScreen(title: String, detail: String, icon: String, identifier: String) -> some View {
+        VStack(spacing: 0) {
+            headerControls
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(spacing: 20) {
+                        Image(systemName: icon)
+                            .font(.system(size: 52))
+                            .accessibilityHidden(true)
+                        Text(title)
+                            .font(.largeTitle.bold())
+                            .accessibilityIdentifier(identifier)
+                        Text(detail)
+                            .font(.body)
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 680)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 32)
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var playbackControls: some View {
+        Button {
+            model.togglePause()
+            revealControls()
+        } label: {
+            Label(model.isPlaying ? "暂停" : "继续播放",
+                  systemImage: model.isPlaying ? "pause.fill" : "play.fill")
+        }
+        .disabled(!model.isReady)
+        .accessibilityIdentifier("strict.pause")
+        Text("已播放 \(Int(max(0, model.position))) 秒")
+            .monospacedDigit()
+            .accessibilityIdentifier("strict.position")
+    }
+
     private func revealControls() {
         showsControls = true
         hideControlsTask?.cancel()
+        guard !isVoiceOverEnabled else { return }
         hideControlsTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }

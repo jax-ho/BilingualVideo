@@ -13,7 +13,9 @@
 		19289AD08FE2F460B5C755C6 /* AutomaticDelayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D65729A40011AB117F43D676 /* AutomaticDelayTests.swift */; };
 		197201F8F4A7835A44B6A5DA /* BilingualVideoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02F22BA00F102AF3523B338A /* BilingualVideoApp.swift */; };
 		2415764E2FD7063F3D089F50 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 292710D16E308EBD6131D39D /* RootView.swift */; };
+		24DB84AEBF11B10060317D50 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D8DA68B14F17052BDF1B5A /* AppTheme.swift */; };
 		2BE3A3752B901BD60E14171F /* PlaybackSequenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E716C1F0F90B8EA87FCC85A7 /* PlaybackSequenceTests.swift */; };
+		2CB92100D721D00E46AAF05E /* InteractionClarityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 924F570D46E9C219CAD89FB5 /* InteractionClarityUITests.swift */; };
 		2CFAA21B1ABEAE90E4C4A7CD /* ParentPortalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15BC63DC3B0481A9A11EC512 /* ParentPortalView.swift */; };
 		36750660C99713831514E3B4 /* strict-playback.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = EB97B0FA44C831E3756C4C62 /* strict-playback.mp4 */; };
 		389F32677FF7C7642551AB45 /* AppModelIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5250F400461F88E4430113C0 /* AppModelIntegrationTests.swift */; };
@@ -21,6 +23,7 @@
 		5C7475838A62449465A50770 /* PlaybackOrientationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92EC41BBD93529B1A5C23CD2 /* PlaybackOrientationUITests.swift */; };
 		63FA48548BBF859A716AA84E /* ScheduleStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1393A939B56AD756E67D1DAF /* ScheduleStoreTests.swift */; };
 		6E62B6B9C50ECD1C2BB58C78 /* StrictVideoPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEA720C50B719060D97164C9 /* StrictVideoPlayerView.swift */; };
+		7C130E08036A5D9BB7432382 /* VisualAcceptanceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC84351AF828D2D3BCA7C7F /* VisualAcceptanceUITests.swift */; };
 		851C5FA301CD69D0B668ED6B /* VideoPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5618CF9DC556C215830147C2 /* VideoPlayerView.swift */; };
 		8BCBA02BE2B8B8EC18730968 /* ParentAccessService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7266B2D2561B45CD54ED48E6 /* ParentAccessService.swift */; };
 		9521B7E039B65F65553A3C26 /* StrictPlaybackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 514B80FD99E1818F5A4395BF /* StrictPlaybackTests.swift */; };
@@ -76,15 +79,18 @@
 		5268AB0ED72F61DBA87FB8C7 /* BilingualVideoUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BilingualVideoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5618CF9DC556C215830147C2 /* VideoPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPlayerView.swift; sourceTree = "<group>"; };
 		59F9BDCECE42152315D6FB72 /* 放牛班的春天.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "放牛班的春天.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5EC84351AF828D2D3BCA7C7F /* VisualAcceptanceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualAcceptanceUITests.swift; sourceTree = "<group>"; };
 		62D51B19A4C54E223ADC4546 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		6AEEAAAAE8F25A74C317E3FA /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
 		7266B2D2561B45CD54ED48E6 /* ParentAccessService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentAccessService.swift; sourceTree = "<group>"; };
 		8ECB1E5819CD09A988EBCA36 /* ScheduleService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleService.swift; sourceTree = "<group>"; };
+		924F570D46E9C219CAD89FB5 /* InteractionClarityUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionClarityUITests.swift; sourceTree = "<group>"; };
 		92EC41BBD93529B1A5C23CD2 /* PlaybackOrientationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackOrientationUITests.swift; sourceTree = "<group>"; };
 		9BEE6697EDCF8F74B12032CE /* UITestFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestFixture.swift; sourceTree = "<group>"; };
 		9C69D3BB789572BB30807C6C /* StrictPlaybackUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrictPlaybackUITests.swift; sourceTree = "<group>"; };
 		9E818D382692CD2BE47A8C10 /* ResourceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceView.swift; sourceTree = "<group>"; };
 		A878F047E78A8BB23735F444 /* ScheduleServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleServiceTests.swift; sourceTree = "<group>"; };
+		B0D8DA68B14F17052BDF1B5A /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		B335318A3307F358FA16C4CC /* VideoLibraryScannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoLibraryScannerTests.swift; sourceTree = "<group>"; };
 		B4712C6B9995C3933BC06C57 /* ScheduleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleStore.swift; sourceTree = "<group>"; };
 		BAFAC8809ADD4381395E3E98 /* TestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestSupport.swift; sourceTree = "<group>"; };
@@ -124,6 +130,7 @@
 		23585F82DFCCC7056C603D23 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				B0D8DA68B14F17052BDF1B5A /* AppTheme.swift */,
 				15BC63DC3B0481A9A11EC512 /* ParentPortalView.swift */,
 				9E818D382692CD2BE47A8C10 /* ResourceView.swift */,
 				292710D16E308EBD6131D39D /* RootView.swift */,
@@ -150,9 +157,11 @@
 		82289C520BF2C943E27E5DA8 /* BilingualVideoUITests */ = {
 			isa = PBXGroup;
 			children = (
+				924F570D46E9C219CAD89FB5 /* InteractionClarityUITests.swift */,
 				92EC41BBD93529B1A5C23CD2 /* PlaybackOrientationUITests.swift */,
 				F857498C0A33D4CF28E57C2C /* ScheduleShiftUITests.swift */,
 				9C69D3BB789572BB30807C6C /* StrictPlaybackUITests.swift */,
+				5EC84351AF828D2D3BCA7C7F /* VisualAcceptanceUITests.swift */,
 			);
 			path = BilingualVideoUITests;
 			sourceTree = "<group>";
@@ -366,9 +375,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2CB92100D721D00E46AAF05E /* InteractionClarityUITests.swift in Sources */,
 				5C7475838A62449465A50770 /* PlaybackOrientationUITests.swift in Sources */,
 				D56AC21D120C17B2BE60B6B7 /* ScheduleShiftUITests.swift in Sources */,
 				DF58E0C05BD310690495178C /* StrictPlaybackUITests.swift in Sources */,
+				7C130E08036A5D9BB7432382 /* VisualAcceptanceUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -396,6 +407,7 @@
 				FEB251428F8373877C34A37E /* AppDirectories.swift in Sources */,
 				E83C224655F6BF6798D1EC8F /* AppModel.swift in Sources */,
 				F949388923CA38740ED7B1C4 /* AppModels.swift in Sources */,
+				24DB84AEBF11B10060317D50 /* AppTheme.swift in Sources */,
 				197201F8F4A7835A44B6A5DA /* BilingualVideoApp.swift in Sources */,
 				8BCBA02BE2B8B8EC18730968 /* ParentAccessService.swift in Sources */,
 				2CFAA21B1ABEAE90E4C4A7CD /* ParentPortalView.swift in Sources */,

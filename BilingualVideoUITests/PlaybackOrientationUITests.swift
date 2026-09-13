@@ -29,7 +29,7 @@ final class PlaybackOrientationUITests: XCTestCase {
         XCTAssertTrue(target.label.contains("编号 100"))
         XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-03"].firstMatch.label.contains("编号 5"))
         XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-04"].firstMatch.label.contains("编号 20"))
-        let landscapeScreenshot = XCTAttachment(screenshot: app.screenshot())
+        let landscapeScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         landscapeScreenshot.name = "calendar-shift-landscape"
         landscapeScreenshot.lifetime = .keepAlways
         add(landscapeScreenshot)
@@ -40,7 +40,7 @@ final class PlaybackOrientationUITests: XCTestCase {
         XCTAssertTrue(target.label.contains("编号 100"), "Rotation must preserve the unsaved calendar adjustment")
         XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-03"].firstMatch.label.contains("编号 5"))
         XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-04"].firstMatch.label.contains("编号 20"))
-        let portraitScreenshot = XCTAttachment(screenshot: app.screenshot())
+        let portraitScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         portraitScreenshot.name = "calendar-shift-retained-after-portrait-rotation"
         portraitScreenshot.lifetime = .keepAlways
         add(portraitScreenshot)
@@ -79,7 +79,7 @@ final class PlaybackOrientationUITests: XCTestCase {
         increment.tap()
         XCTAssertEqual(stepper.value as? String, "4 组")
         XCTAssertEqual(app.state, .runningForeground)
-        let landscapeScreenshot = XCTAttachment(screenshot: app.screenshot())
+        let landscapeScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         landscapeScreenshot.name = "parent-viewing-settings-landscape-cold-launch"
         landscapeScreenshot.lifetime = .keepAlways
         add(landscapeScreenshot)
@@ -92,7 +92,7 @@ final class PlaybackOrientationUITests: XCTestCase {
         decrement.tap()
         XCTAssertEqual(stepper.value as? String, "3 组")
         XCTAssertEqual(app.state, .runningForeground)
-        let portraitScreenshot = XCTAttachment(screenshot: app.screenshot())
+        let portraitScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         portraitScreenshot.name = "parent-viewing-settings-after-portrait-rotation"
         portraitScreenshot.lifetime = .keepAlways
         add(portraitScreenshot)
@@ -142,7 +142,7 @@ final class PlaybackOrientationUITests: XCTestCase {
             XCTAssertEqual(seconds(in: app), pausedPosition)
             XCTAssertEqual(app.staticTexts["strict.currentEpisode"].label, episode)
             XCTAssertEqual(app.sliders.count, 0, "Rotation must not expose seeking in strict mode")
-            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = "strict-paused-\(name)"
             screenshot.lifetime = .keepAlways
             add(screenshot)
@@ -194,7 +194,7 @@ final class PlaybackOrientationUITests: XCTestCase {
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: app)
         let result = XCTWaiter.wait(for: [expectation], timeout: 5)
         if result != .completed {
-            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = "orientation-failure"
             screenshot.lifetime = .keepAlways
             add(screenshot)

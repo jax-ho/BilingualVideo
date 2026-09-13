@@ -10,7 +10,10 @@ struct RootView: View {
     @ViewBuilder
     var body: some View {
         #if DEBUG
-        if UITestFixture.isStrictPlayback {
+        if UITestFixture.isStrictPlayback,
+           ProcessInfo.processInfo.arguments.contains("--ui-test-parent-gate") {
+            standardContent
+        } else if UITestFixture.isStrictPlayback {
             if isShowingParentPortal {
                 ParentHomeView(onClose: { isShowingParentPortal = false })
             } else {
@@ -57,11 +60,11 @@ struct RootView: View {
                         } label: {
                             Label("家长入口", systemImage: "lock.shield")
                         }
-                        .accessibilityHint("需要家长 PIN")
+                        .accessibilityHint("需要家长密码")
                     }
                 }
         }
-        .sheet(isPresented: $isShowingParentPortal, onDismiss: { appModel.refreshToday() }) {
+        .fullScreenCover(isPresented: $isShowingParentPortal, onDismiss: { appModel.refreshToday() }) {
             ParentPortalView()
                 .environmentObject(appModel)
         }

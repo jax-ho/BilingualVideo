@@ -17,7 +17,7 @@ final class ScheduleShiftUITests: XCTestCase {
         XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-07"].firstMatch.label.contains("编号 5"))
         XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-09"].firstMatch.label.contains("编号 20"))
         XCTAssertTrue(app.buttons["schedule.calendar.day.2026-09-10"].firstMatch.label.contains("编号 100"))
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "automatic-delay-calendar"
         screenshot.lifetime = .keepAlways
         add(screenshot)
@@ -31,15 +31,16 @@ final class ScheduleShiftUITests: XCTestCase {
         let settings = app.staticTexts["观看设置"]
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.tap()
-        let modePicker = app.buttons["settings.playbackMode"]
-        XCTAssertTrue(modePicker.waitForExistence(timeout: 3))
-        XCTAssertEqual(modePicker.value as? String, "严格")
+        let strictMode = app.buttons["settings.mode.strict"]
+        let normalMode = app.buttons["settings.mode.normal"]
+        XCTAssertTrue(strictMode.waitForExistence(timeout: 3))
+        XCTAssertTrue(normalMode.exists)
+        XCTAssertEqual(strictMode.value as? String, "已选择")
+        XCTAssertEqual(normalMode.value as? String, "未选择")
         XCTAssertFalse(app.switches["settings.normalPlaybackLooping"].exists)
-        modePicker.tap()
-        let normalMode = app.buttons["普通"]
-        XCTAssertTrue(normalMode.waitForExistence(timeout: 3))
         normalMode.tap()
-        XCTAssertEqual(modePicker.value as? String, "普通")
+        XCTAssertEqual(normalMode.value as? String, "已选择")
+        XCTAssertEqual(strictMode.value as? String, "未选择")
         let looping = app.switches["settings.normalPlaybackLooping"]
         XCTAssertTrue(looping.exists)
         XCTAssertEqual(looping.value as? String, "1")
@@ -57,7 +58,7 @@ final class ScheduleShiftUITests: XCTestCase {
         XCTAssertEqual(stepper.value as? String, "1 组")
         stepper.buttons["settings.dailyGroupCount-Increment"].tap()
         XCTAssertEqual(stepper.value as? String, "2 组")
-        let settingsImage = XCTAttachment(screenshot: app.screenshot())
+        let settingsImage = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         settingsImage.name = "viewing-settings"
         settingsImage.lifetime = .keepAlways
         add(settingsImage)
@@ -70,7 +71,7 @@ final class ScheduleShiftUITests: XCTestCase {
         app.swipeUp()
         XCTAssertFalse(app.buttons["today.play.100.chinese"].exists)
         XCTAssertFalse(app.buttons["today.play.100.english"].exists)
-        let homeImage = XCTAttachment(screenshot: app.screenshot())
+        let homeImage = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         homeImage.name = "daily-groups-home"
         homeImage.lifetime = .keepAlways
         add(homeImage)
@@ -185,6 +186,7 @@ final class ScheduleShiftUITests: XCTestCase {
     }
 
     func testSelectingPairAndCalendarDateMovesWholePlan() throws {
+        continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments.append("--ui-test-schedule-editor")
         app.launch()
@@ -207,22 +209,40 @@ final class ScheduleShiftUITests: XCTestCase {
             XCTFail("缺少可点选的 9 月 5 日日历格")
             return
         }
+        scrollDetailToReveal(source, in: app)
         XCTAssertTrue(source.isHittable, "“编号 100”不可触摸")
-        XCTAssertTrue(target.isHittable, "9 月 5 日的日历格不可触摸")
-
         source.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertEqual(source.value as? String, "已选择")
-        target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
-        XCTAssertTrue(
-            waitForValue(of: datePicker, toEqual: "2026年9月3日"),
-            "选择编号 100 并点 9 月 5 日后，开始日期没有整体前移到 9 月 3 日"
-        )
+        // The group picker and month grid need not fit on the screen together.
+        // Keep coordinate taps to verify the physical hit targets after scrolling.
+        scrollDetailToReveal(target, in: app)
+        XCTAssertTrue(target.isHittable, "9 月 5 日的日历格不可触摸")
+        target.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertEqual(source.value as? String, "未选择")
 
         let result = app.staticTexts["schedule.shift.result"]
         XCTAssertTrue(result.waitForExistence(timeout: 2))
         XCTAssertTrue(result.label.contains("其他视频组也前移 2 天"))
+
+        let lastDay = app.buttons["schedule.calendar.day.2026-09-30"].firstMatch
+        scrollDetailToReveal(lastDay, in: app)
+        let firstDay = app.buttons["schedule.calendar.day.2026-09-01"].firstMatch
+        XCTAssertTrue(firstDay.isHittable)
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(firstDay.frame))
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(lastDay.frame))
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "calendar-selection-whole-plan-shift"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        // Bring the start-date section back before resolving the first native
+        // date picker; the calendar's jump-date control has the same system label.
+        scrollDetailToReveal(app.buttons["schedule.shift.previous"], in: app, scrollingUp: true)
+        XCTAssertTrue(
+            waitForValue(of: datePicker, toEqual: "2026年9月3日"),
+            "选择编号 100 并点 9 月 5 日后，开始日期没有整体前移到 9 月 3 日"
+        )
     }
 
     func testVisibleDayShiftButtonsRespondToPhysicalTaps() throws {
@@ -279,5 +299,23 @@ final class ScheduleShiftUITests: XCTestCase {
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.82))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
+    }
+
+    private func scrollDetailToReveal(_ element: XCUIElement, in app: XCUIApplication, scrollingUp: Bool = false) {
+        let window = app.windows.firstMatch
+        for _ in 0..<8 {
+            let frame = window.frame
+            let navigationBottom = app.navigationBars.allElementsBoundByIndex
+                .map(\.frame).filter { $0.intersects(frame) }.map(\.maxY).max() ?? frame.minY
+            let viewport = CGRect(x: frame.minX, y: navigationBottom, width: frame.width,
+                                  height: max(0, frame.maxY - navigationBottom))
+            if element.exists, element.isHittable, viewport.contains(element.frame) { return }
+            let isAbove = element.exists && element.frame.height > 0 && element.frame.minY < viewport.minY
+            let startY = scrollingUp || isAbove ? 0.35 : 0.80
+            let endY = scrollingUp || isAbove ? 0.80 : 0.35
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.86, dy: startY))
+                .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.86, dy: endY)))
+        }
+        XCTFail("The control must be fully reachable in the right-hand detail column: \(element.identifier)")
     }
 }
