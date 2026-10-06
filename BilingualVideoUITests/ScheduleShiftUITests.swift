@@ -28,7 +28,7 @@ final class ScheduleShiftUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-test-schedule-editor", "--ui-test-viewing-settings", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        let settings = app.staticTexts["观看设置"]
+        let settings = app.staticTexts["学习设置"]
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.tap()
         let strictMode = app.buttons["settings.mode.strict"]

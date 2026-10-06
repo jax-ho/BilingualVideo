@@ -66,7 +66,7 @@ final class PlaybackOrientationUITests: XCTestCase {
         }
         app.launch()
 
-        let settings = app.staticTexts["观看设置"].firstMatch
+        let settings = app.staticTexts["学习设置"].firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         assertWindowOrientation(in: app, landscape: true)
         XCTAssertTrue(settings.isHittable)

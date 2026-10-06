@@ -9,6 +9,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var dailyGroupCount: Int
     @Published private(set) var playbackMode: PlaybackMode
     @Published private(set) var isNormalPlaybackLooping: Bool
+    @Published private(set) var pdfScanResult = PDFLibraryScanResult()
+    @Published private(set) var savedPDFPlan: ViewingPlan?
+    @Published private(set) var todayPDFIDs: [Int] = []
+    @Published private(set) var dailyPDFCount: Int
+    @Published private(set) var learningOrder: LearningOrder
     @Published var errorMessage: String?
 
     let directories: AppDirectories
@@ -16,12 +21,16 @@ final class AppModel: ObservableObject {
     let scheduleService: ScheduleService
     let scheduleStore: ScheduleStore
     let parentAccessService: ParentAccessService
+    let pdfScanner: PDFLibraryScanner
+    let pdfScheduleStore: ScheduleStore
 
     private let now: () -> Date
     private let preferences: UserDefaults
     private static let dailyGroupCountKey = "dailyGroupCount"
     private static let playbackModeKey = "playbackMode"
     private static let normalPlaybackLoopingKey = "normalPlaybackLooping"
+    private static let dailyPDFCountKey = "dailyPDFCount"
+    private static let learningOrderKey = "learningOrder"
     private var midnightTimer: Timer?
 
     init(
@@ -38,6 +47,8 @@ final class AppModel: ObservableObject {
             fileManager: directories.fileManager
         )
         self.parentAccessService = ParentAccessService()
+        self.pdfScanner = PDFLibraryScanner(directories: directories)
+        self.pdfScheduleStore = ScheduleStore(fileURL: directories.pdfScheduleURL, fileManager: directories.fileManager)
         self.now = now
         self.preferences = preferences
         let storedCount = preferences.integer(forKey: Self.dailyGroupCountKey)
@@ -45,6 +56,10 @@ final class AppModel: ObservableObject {
         self.playbackMode = preferences.string(forKey: Self.playbackModeKey)
             .flatMap(PlaybackMode.init(rawValue:)) ?? .strict
         self.isNormalPlaybackLooping = preferences.object(forKey: Self.normalPlaybackLoopingKey) as? Bool ?? true
+        let storedPDFCount = preferences.integer(forKey: Self.dailyPDFCountKey)
+        self.dailyPDFCount = storedPDFCount > 0 ? storedPDFCount : 3
+        self.learningOrder = preferences.string(forKey: Self.learningOrderKey)
+            .flatMap(LearningOrder.init(rawValue:)) ?? .videosFirst
 
         bootstrap()
     }
@@ -83,6 +98,7 @@ final class AppModel: ObservableObject {
         copy.playbackTracking = savedPlan?.playbackTracking
             ?? PlanPlaybackTracking(day: scheduleService.day(containing: currentDate), hasPlayed: false)
         copy.strictPlayback = savedPlan?.strictPlayback
+        copy.normalCompletion = savedPlan?.normalCompletion
         copy = clearingChangedStrictProgress(in: copy, at: currentDate, groupCount: dailyGroupCount)
         try scheduleStore.save(copy)
         savedPlan = copy
@@ -101,6 +117,7 @@ final class AppModel: ObservableObject {
 
     func refreshToday(at date: Date? = nil) {
         let currentDate = date ?? now()
+        refreshPDFToday(at: currentDate)
         do {
             try settlePlan(at: currentDate)
         } catch {
@@ -189,13 +206,15 @@ final class AppModel: ObservableObject {
     private func clearingChangedStrictProgress(
         in plan: ViewingPlan, at date: Date, groupCount: Int
     ) -> ViewingPlan {
-        guard let progress = plan.strictPlayback,
-              progress.day == scheduleService.day(containing: date),
-              progress.pairIDs != scheduleService.pairIDs(in: plan, on: date, dailyGroupCount: groupCount) else {
-            return plan
-        }
         var updated = plan
-        updated.strictPlayback = nil
+        let day = scheduleService.day(containing: date)
+        let ids = scheduleService.pairIDs(in: plan, on: date, dailyGroupCount: groupCount)
+        if let progress = plan.strictPlayback, progress.day == day, progress.pairIDs != ids {
+            updated.strictPlayback = nil
+        }
+        if let completion = plan.normalCompletion, completion.day == day, completion.pairIDs != ids {
+            updated.normalCompletion = nil
+        }
         // Keep playbackTracking: real playback still counts for automatic delay.
         return updated
     }
@@ -370,6 +389,11 @@ final class AppModel: ObservableObject {
         } catch {
             errorMessage = "App 初始化失败，请让家长检查本地存储。"
         }
+        do {
+            savedPDFPlan = try pdfScheduleStore.load()
+        } catch {
+            errorMessage = "PDF 计划无法读取，文件未被覆盖。请让家长检查。"
+        }
         refreshToday()
     }
 
@@ -395,5 +419,232 @@ final class AppModel: ObservableObject {
                 self?.scheduleMidnightRefresh()
             }
         }
+    }
+}
+
+extension AppModel {
+    var pdfProgressToday: PDFReadingProgress? {
+        guard let progress = savedPDFPlan?.pdfReading,
+              progress.day == scheduleService.day(containing: now()) else { return nil }
+        return progress
+    }
+
+    var missingPlannedPDFIDs: [Int] {
+        let available = Set(pdfScanResult.books.map(\.id))
+        return savedPDFPlan?.orderedPairIDs.filter { !available.contains($0) } ?? []
+    }
+
+    @discardableResult
+    func refreshPDFLibrary() -> PDFLibraryScanResult {
+        pdfScanResult = pdfScanner.scan()
+        return pdfScanResult
+    }
+
+    func makePDFCandidate(startDate: Date) -> ViewingPlan? {
+        let result = refreshPDFLibrary()
+        guard result.isValidForGeneration else { return nil }
+        return scheduleService.generate(identifiers: result.books.map(\.id), startDate: startDate, now: now())
+    }
+
+    func savePDFPlan(_ plan: ViewingPlan) throws {
+        let date = now()
+        try settlePDFPlan(at: date)
+        if let tracking = plan.playbackTracking, let savedPDFPlan,
+           let live = savedPDFPlan.playbackTracking, tracking.day != live.day,
+           !plan.hasSameSchedule(as: savedPDFPlan) {
+            throw PlanEditingError.staleDraft
+        }
+        var copy = plan
+        copy.updatedAt = date
+        copy.playbackTracking = savedPDFPlan?.playbackTracking
+            ?? PlanPlaybackTracking(day: scheduleService.day(containing: date), hasPlayed: false)
+        copy.pdfReading = savedPDFPlan?.pdfReading
+        copy.strictPlayback = nil
+        copy.normalCompletion = nil
+        copy = clearingChangedPDFProgress(in: copy, at: date, count: dailyPDFCount)
+        try pdfScheduleStore.save(copy)
+        savedPDFPlan = copy
+        refreshPDFToday(at: date)
+    }
+
+    func setDailyPDFCount(_ count: Int) {
+        guard count >= 1 else { return }
+        do {
+            try settlePDFPlan(at: now())
+            if let savedPDFPlan {
+                let copy = clearingChangedPDFProgress(in: savedPDFPlan, at: now(), count: count)
+                if copy != savedPDFPlan {
+                    try pdfScheduleStore.save(copy)
+                    self.savedPDFPlan = copy
+                }
+            }
+            preferences.set(count, forKey: Self.dailyPDFCountKey)
+            dailyPDFCount = count
+            refreshPDFToday(at: now())
+        } catch {
+            errorMessage = "PDF 设置未能保存，原设置与阅读进度仍然保留。"
+        }
+    }
+
+    func setLearningOrder(_ order: LearningOrder) {
+        preferences.set(order.rawValue, forKey: Self.learningOrderKey)
+        learningOrder = order
+    }
+
+    func beginPDFReading() throws -> PDFReadingRequest? {
+        let date = now()
+        try settlePDFPlan(at: date)
+        refreshPDFLibrary()
+        guard var plan = savedPDFPlan else { return nil }
+        let day = scheduleService.day(containing: date)
+        if let progress = plan.pdfReading, progress.day > day { throw PDFReadingError.expired }
+        if plan.pdfReading?.day != day {
+            let ids = scheduleService.pairIDs(in: plan, on: date, dailyGroupCount: dailyPDFCount)
+            guard !ids.isEmpty else { return nil }
+            plan.pdfReading = PDFReadingProgress(day: day, bookIDs: ids, sessionID: UUID())
+            try pdfScheduleStore.save(plan)
+            savedPDFPlan = plan
+        }
+        return try pdfRequest(for: plan.pdfReading!)
+    }
+
+    /// Rendering a page counts as actual reading; loading or a failed open does not.
+    func savePDFPage(_ request: PDFReadingRequest, pageIndex: Int, pageCount: Int) throws {
+        var plan = try pdfPlan(matching: request)
+        guard pageCount > 0, (0..<pageCount).contains(pageIndex) else { throw PDFReadingError.invalidPage }
+        plan.pdfReading!.pageIndex = pageIndex
+        plan.pdfReading!.pageCount = pageCount
+        plan.pdfReading!.hasStarted = true
+        plan.playbackTracking = PlanPlaybackTracking(day: request.day, hasPlayed: true)
+        guard plan != savedPDFPlan else { return }
+        try pdfScheduleStore.save(plan)
+        savedPDFPlan = plan
+    }
+
+    func finishPDFReading(_ request: PDFReadingRequest) throws -> PDFReadingRequest? {
+        var plan = try pdfPlan(matching: request)
+        let progress = plan.pdfReading!
+        guard progress.pageCount > 0, progress.pageIndex == progress.pageCount - 1 else {
+            throw PDFReadingError.invalidPage
+        }
+        plan.pdfReading!.index += 1
+        plan.pdfReading!.pageIndex = 0
+        plan.pdfReading!.pageCount = 0
+        try pdfScheduleStore.save(plan)
+        savedPDFPlan = plan
+        return try pdfRequest(for: plan.pdfReading!)
+    }
+
+    func isCurrentPDFRequest(_ request: PDFReadingRequest) -> Bool {
+        (try? pdfPlan(matching: request)) != nil
+    }
+
+    var canResetTodayPDFProgress: Bool { pdfProgressToday?.hasStarted == true }
+
+    func resetTodayPDFProgress() throws {
+        try settlePDFPlan(at: now())
+        guard canResetTodayPDFProgress, var plan = savedPDFPlan else { return }
+        plan.pdfReading = nil
+        try pdfScheduleStore.save(plan)
+        savedPDFPlan = plan
+        refreshPDFToday(at: now())
+    }
+
+    var videosFinishedToday: Bool {
+        let ids = savedPlan.map { scheduleService.pairIDs(in: $0, on: now(), dailyGroupCount: dailyGroupCount) } ?? []
+        if ids.isEmpty { return true }
+        if playbackMode == .strict { return strictProgressToday?.isFinished == true }
+        return savedPlan?.normalCompletion?.day == scheduleService.day(containing: now())
+            && savedPlan?.normalCompletion?.isFinished == true
+    }
+
+    var nextStudyContent: StudyContent? {
+        let pdfIDs = savedPDFPlan.map { scheduleService.pairIDs(in: $0, on: now(), dailyGroupCount: dailyPDFCount) } ?? []
+        return learningOrder.contents.first {
+            $0 == .video ? !videosFinishedToday : !pdfIDs.isEmpty && pdfProgressToday?.isFinished != true
+        }
+    }
+
+    func recordNormalEpisodeCompletion(_ video: PlayableVideo, on day: LocalDay) throws {
+        guard playbackMode == .normal, day == scheduleService.day(containing: now()),
+              var plan = savedPlan else { throw StrictPlaybackError.expired }
+        let ids = scheduleService.pairIDs(in: plan, on: now(), dailyGroupCount: dailyGroupCount)
+        guard ids.contains(video.pairID) else { throw StrictPlaybackError.expired }
+        if plan.normalCompletion?.day != day || plan.normalCompletion?.pairIDs != ids {
+            plan.normalCompletion = NormalVideoCompletion(day: day, pairIDs: ids)
+        }
+        if plan.normalCompletion!.completedVideoIDs.contains(video.id) { return }
+        plan.normalCompletion!.completedVideoIDs.append(video.id)
+        try scheduleStore.save(plan)
+        savedPlan = plan
+    }
+
+    func nextStudyVideo() throws -> PlayableVideo? {
+        refreshToday()
+        guard !videosFinishedToday else { return nil }
+        guard let plan = savedPlan,
+              todayStates.map(\.id) == scheduleService.pairIDs(in: plan, on: now(), dailyGroupCount: dailyGroupCount) else {
+            throw StrictPlaybackError.invalidProgress
+        }
+        let completed = savedPlan?.normalCompletion?.day == scheduleService.day(containing: now())
+            ? savedPlan?.normalCompletion?.completedVideoIDs ?? [] : []
+        for state in todayStates {
+            for language in VideoLanguage.allCases where !completed.contains("\(state.id)-\(language.rawValue)") {
+                guard case let .playable(pair) = state else {
+                    throw PlaybackSequenceError.unavailablePair(state.id)
+                }
+                return PlayableVideo(pairID: pair.id, language: language,
+                                     url: directories.videoURL(for: pair, language: language))
+            }
+        }
+        return nil
+    }
+
+    private func refreshPDFToday(at date: Date) {
+        do {
+            try settlePDFPlan(at: date)
+            refreshPDFLibrary()
+            todayPDFIDs = savedPDFPlan.map {
+                scheduleService.pairIDs(in: $0, on: date, dailyGroupCount: dailyPDFCount)
+            } ?? []
+        } catch {
+            todayPDFIDs = []
+            errorMessage = "PDF 计划更新未能保存，原计划与阅读进度仍然保留。"
+        }
+    }
+
+    private func settlePDFPlan(at date: Date) throws {
+        guard let savedPDFPlan else { return }
+        let settled = scheduleService.settlingUnplayedDays(in: savedPDFPlan, at: date)
+        let copy = clearingChangedPDFProgress(in: settled, at: date, count: dailyPDFCount)
+        guard copy != savedPDFPlan else { return }
+        try pdfScheduleStore.save(copy)
+        self.savedPDFPlan = copy
+    }
+
+    private func clearingChangedPDFProgress(in plan: ViewingPlan, at date: Date, count: Int) -> ViewingPlan {
+        guard let progress = plan.pdfReading, progress.day == scheduleService.day(containing: date),
+              progress.bookIDs != scheduleService.pairIDs(in: plan, on: date, dailyGroupCount: count) else { return plan }
+        var copy = plan
+        copy.pdfReading = nil
+        return copy
+    }
+
+    private func pdfPlan(matching request: PDFReadingRequest) throws -> ViewingPlan {
+        guard request.day == scheduleService.day(containing: now()),
+              let plan = savedPDFPlan, let progress = plan.pdfReading,
+              progress.day == request.day, progress.sessionID == request.sessionID,
+              progress.index == request.index, !progress.isFinished,
+              progress.bookIDs[progress.index] == request.book.id else { throw PDFReadingError.expired }
+        return plan
+    }
+
+    private func pdfRequest(for progress: PDFReadingProgress) throws -> PDFReadingRequest? {
+        guard !progress.isFinished else { return nil }
+        let id = progress.bookIDs[progress.index]
+        guard let book = refreshPDFLibrary().book(id: id) else { throw PDFReadingError.unavailable(id) }
+        return PDFReadingRequest(day: progress.day, index: progress.index, sessionID: progress.sessionID,
+                                 book: book, url: directories.razURL.appendingPathComponent(book.fileName),
+                                 pageIndex: progress.pageIndex, bookCount: progress.bookIDs.count)
     }
 }

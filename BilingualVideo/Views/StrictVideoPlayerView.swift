@@ -155,9 +155,11 @@ struct StrictVideoPlayerView: View {
     @State private var showsControls = true
     @State private var hideControlsTask: Task<Void, Never>?
     @State private var previousIdleTimerDisabled = false
+    private let onFinished: (() -> Void)?
 
-    init(request: StrictPlaybackRequest, appModel: AppModel) {
+    init(request: StrictPlaybackRequest, appModel: AppModel, onFinished: (() -> Void)? = nil) {
         _model = StateObject(wrappedValue: StrictVideoPlayerModel(request: request, appModel: appModel))
+        self.onFinished = onFinished
     }
 
     var body: some View {
@@ -209,6 +211,7 @@ struct StrictVideoPlayerView: View {
             if playing { revealControls() }
         }
         .onChange(of: model.shouldDismiss) { _, value in if value { dismiss() } }
+        .onChange(of: model.isFinished) { _, value in if value { onFinished?() } }
         .onChange(of: isVoiceOverEnabled) { _, _ in revealControls() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { model.close(); dismiss() }

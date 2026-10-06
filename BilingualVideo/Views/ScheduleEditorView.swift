@@ -4,6 +4,7 @@ struct ScheduleEditorView: View {
     @EnvironmentObject private var appModel: AppModel
     @Binding var draft: ViewingPlan?
     let onSaveCompleted: () -> Void
+    let content: StudyContent
     @State private var chosenStartDate = Date()
     @State private var generationAttempted = false
     @State private var isShowingRegenerateConfirmation = false
@@ -14,9 +15,11 @@ struct ScheduleEditorView: View {
 
     init(
         draft: Binding<ViewingPlan?>,
+        content: StudyContent = .video,
         onSaveCompleted: @escaping () -> Void = {}
     ) {
         _draft = draft
+        self.content = content
         self.onSaveCompleted = onSaveCompleted
     }
 
@@ -35,12 +38,12 @@ struct ScheduleEditorView: View {
             }
             .listRowBackground(AppTheme.sage)
 
-            if generationAttempted, !appModel.scanResult.isValidForGeneration {
+            if generationAttempted, !isValidForGeneration {
                 Section("无法生成计划") {
-                    if appModel.scanResult.pairs.isEmpty {
-                        Text("没有完整的中英文视频。请先到视频资源中添加。")
+                    if availableItemCount == 0 {
+                        Text(content == .video ? "没有完整的中英文视频。请先到视频资源中添加。" : "没有可用 PDF。请先在 raz 文件夹中添加。")
                     }
-                    ForEach(appModel.scanResult.issues) { issue in
+                    ForEach(scanIssues) { issue in
                         IssueRow(issue: issue)
                     }
                     Text("当前已保存计划没有改变。")
@@ -52,15 +55,15 @@ struct ScheduleEditorView: View {
 
             if draft == nil {
                 Section("开始安排观看") {
-                    Text("先在“视频资源”中准备中英文视频，再选择开始日期。")
+                    Text(content == .video ? "先在“视频资源”中准备中英文视频，再选择开始日期。" : "先在 raz 文件夹中准备数字命名的 PDF，再选择开始日期。")
                         .font(.subheadline).foregroundStyle(AppTheme.muted)
                     DatePicker("开始日期", selection: $chosenStartDate, displayedComponents: .date)
                     Button {
                         generateCandidate()
                     } label: {
-                        Label("用现有视频创建计划", systemImage: "calendar.badge.plus")
+                        Label("用现有\(content.displayName)创建计划", systemImage: "calendar.badge.plus")
                     }
-                    .disabled(appModel.scanResult.pairs.isEmpty)
+                    .disabled(availableItemCount == 0)
                 }
                 .listRowBackground(AppTheme.surface)
             } else {
@@ -71,7 +74,7 @@ struct ScheduleEditorView: View {
         }
         .springList()
         .environment(\.editMode, .constant(.active))
-        .navigationTitle("计划编辑")
+        .navigationTitle(content == .video ? "计划编辑" : "PDF 计划")
         .toolbarBackground(AppTheme.canvas, for: .navigationBar)
         .toolbar {
             if draft != nil {
@@ -88,10 +91,10 @@ struct ScheduleEditorView: View {
         .task {
             loadPersistedDraftIfNeeded()
             focusCalendarOnDraftIfNeeded()
-            appModel.refreshLibrary()
+            refreshResources()
         }
         .confirmationDialog(
-            "用现有视频重新生成计划？",
+            "用现有\(content.displayName)重新生成计划？",
             isPresented: $isShowingRegenerateConfirmation,
             titleVisibility: .visible
         ) {
@@ -100,16 +103,17 @@ struct ScheduleEditorView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("按现有视频编号重新安排顺序和日期，替换当前草稿。点击保存后才会改变孩子的观看计划。")
+            Text("按现有\(content.displayName)编号重新安排顺序和日期，替换当前草稿。点击保存后才会改变孩子的学习计划。")
         }
         .sheet(isPresented: $isShowingSavePreview, onDismiss: finishSavingIfNeeded) {
             if let draft {
                 SavePlanPreviewView(
-                    oldPlan: appModel.savedPlan,
+                    content: content,
+                    oldPlan: persistedPlan,
                     newPlan: draft,
                     calendar: appModel.scheduleService.calendar,
-                    changesToday: appModel.todayStates.map(\.id) != appModel.scheduleService.pairIDs(
-                        in: draft, on: appModel.currentDate, dailyGroupCount: appModel.dailyGroupCount
+                    changesToday: todayIDs != appModel.scheduleService.pairIDs(
+                        in: draft, on: appModel.currentDate, dailyGroupCount: dailyCount
                     ),
                     onCancel: { isShowingSavePreview = false },
                     onSave: saveDraft
@@ -127,6 +131,18 @@ struct ScheduleEditorView: View {
         } message: {
             Text(saveError ?? "")
         }
+    }
+
+    private var persistedPlan: ViewingPlan? { content == .video ? appModel.savedPlan : appModel.savedPDFPlan }
+    private var availableItemCount: Int { content == .video ? appModel.scanResult.pairs.count : appModel.pdfScanResult.books.count }
+    private var isValidForGeneration: Bool { content == .video ? appModel.scanResult.isValidForGeneration : appModel.pdfScanResult.isValidForGeneration }
+    private var scanIssues: [LibraryValidationIssue] { content == .video ? appModel.scanResult.issues : appModel.pdfScanResult.issues }
+    private var todayIDs: [Int] { content == .video ? appModel.todayStates.map(\.id) : appModel.todayPDFIDs }
+    private var dailyCount: Int { content == .video ? appModel.dailyGroupCount : appModel.dailyPDFCount }
+
+    private func refreshResources() {
+        if content == .video { appModel.refreshLibrary() }
+        else { appModel.refreshPDFLibrary() }
     }
 
     private var planSummarySection: some View {
@@ -155,7 +171,7 @@ struct ScheduleEditorView: View {
             .buttonStyle(.borderless)
 
             if let draft {
-                LabeledContent("视频组数", value: "\(draft.orderedPairIDs.count)")
+                LabeledContent(content == .video ? "视频组数" : "PDF 份数", value: "\(draft.orderedPairIDs.count)")
                 if let endDay = appModel.scheduleService.preview(draft).last?.day {
                     LabeledContent("结束日期", value: format(endDay))
                 }
@@ -170,7 +186,8 @@ struct ScheduleEditorView: View {
                 ForEach(ids, id: \.self) { id in
                     PairOrderRow(
                         pairID: id,
-                        pair: appModel.scanResult.pair(id: id),
+                        pair: content == .video ? appModel.scanResult.pair(id: id) : nil,
+                        pdf: content == .pdf ? appModel.pdfScanResult.book(id: id) : nil,
                         moveUp: { movePair(id: id, by: -1) },
                         moveDown: { movePair(id: id, by: 1) }
                     )
@@ -183,14 +200,14 @@ struct ScheduleEditorView: View {
                 Button {
                     isShowingRegenerateConfirmation = true
                 } label: {
-                    Label("用现有视频重新生成计划…", systemImage: "arrow.triangle.2.circlepath")
+                    Label("用现有\(content.displayName)重新生成计划…", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .accessibilityIdentifier("schedule.regenerate")
             }
         } header: {
-            Text("播放顺序")
+            Text(content == .video ? "播放顺序" : "阅读顺序")
         } footer: {
-            Text("拖动右侧把手调整顺序；中英文始终作为一组移动。")
+            Text(content == .video ? "拖动右侧把手调整顺序；中英文始终作为一组移动。" : "拖动右侧把手调整 PDF 顺序，保存后生效。")
         }
         .listRowBackground(AppTheme.surface)
     }
@@ -199,6 +216,7 @@ struct ScheduleEditorView: View {
         Section {
             if let draft {
                 PlanCalendarShiftView(
+                    content: content,
                     plan: draft,
                     calendar: appModel.scheduleService.calendar,
                     focusDate: $calendarFocusDate,
@@ -214,9 +232,9 @@ struct ScheduleEditorView: View {
                 )
             }
         } header: {
-            Text("指定某天从哪组开始")
+            Text("指定某天从哪\(content.unit)开始")
         } footer: {
-            Text("日历编号表示当天的第一组。调整时，整条计划一起移动，播放顺序不变。")
+            Text("日历编号表示当天的第一\(content.unit)。调整时，整条计划一起移动，顺序不变。")
         }
         .listRowBackground(AppTheme.surface)
     }
@@ -240,7 +258,7 @@ struct ScheduleEditorView: View {
     }
 
     private var hasUnsavedChanges: Bool {
-        switch (appModel.savedPlan, draft) {
+        switch (persistedPlan, draft) {
         case (nil, nil): false
         case (nil, .some): true
         case (.some, nil): true
@@ -250,7 +268,7 @@ struct ScheduleEditorView: View {
     }
 
     private func loadPersistedDraftIfNeeded() {
-        guard draft == nil, let saved = appModel.savedPlan else { return }
+        guard draft == nil, let saved = persistedPlan else { return }
         draft = saved
         chosenStartDate = saved.startDay.date(in: appModel.scheduleService.calendar) ?? Date()
         calendarFocusDate = chosenStartDate
@@ -268,7 +286,7 @@ struct ScheduleEditorView: View {
     private func generateCandidate() {
         generationAttempted = true
         let date = draft?.startDay.date(in: appModel.scheduleService.calendar) ?? chosenStartDate
-        guard let candidate = appModel.makeCandidate(startDate: date) else { return }
+        guard let candidate = (content == .video ? appModel.makeCandidate(startDate: date) : appModel.makePDFCandidate(startDate: date)) else { return }
         draft = candidate
         calendarFocusDate = candidate.startDay.date(in: appModel.scheduleService.calendar) ?? date
     }
@@ -295,8 +313,9 @@ struct ScheduleEditorView: View {
     private func saveDraft() {
         guard let draft else { return }
         do {
-            try appModel.savePlan(draft)
-            self.draft = appModel.savedPlan
+            if content == .video { try appModel.savePlan(draft) }
+            else { try appModel.savePDFPlan(draft) }
+            self.draft = persistedPlan
             shouldCloseAfterSave = true
             isShowingSavePreview = false
         } catch let error as PlanEditingError {
@@ -323,6 +342,7 @@ struct ScheduleEditorView: View {
 private struct PairOrderRow: View {
     let pairID: Int
     let pair: VideoPair?
+    let pdf: PDFBook?
     let moveUp: () -> Void
     let moveDown: () -> Void
 
@@ -334,6 +354,8 @@ private struct PairOrderRow: View {
                 Text("中文：\(pair.chineseFileName)　英文：\(pair.englishFileName)")
                     .font(.caption)
                     .foregroundStyle(AppTheme.muted)
+            } else if let pdf {
+                Text("raz/\(pdf.fileName)").font(.caption).foregroundStyle(AppTheme.muted)
             } else {
                 Label("当前资源缺失", systemImage: "exclamationmark.triangle")
                     .font(.caption)
@@ -349,6 +371,7 @@ private struct PairOrderRow: View {
 }
 
 private struct PlanCalendarShiftView: View {
+    let content: StudyContent
     let plan: ViewingPlan
     let calendar: Calendar
     @Binding var focusDate: Date
@@ -360,7 +383,7 @@ private struct PlanCalendarShiftView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("1. 选择当天的第一组")
+            Text("1. 选择当天的第一\(content.unit)")
                 .font(.subheadline.bold())
 
             ScrollView(.horizontal, showsIndicators: true) {
@@ -455,6 +478,7 @@ private struct PlanCalendarShiftView: View {
                                 let index = rowStart + column
                                 if index < cells.count, let day = cells[index] {
                                     CalendarDaySelectionCell(
+                                        content: content,
                                         day: day,
                                         pairID: pairID(on: day),
                                         accessibilityDate: format(day),
@@ -482,7 +506,7 @@ private struct PlanCalendarShiftView: View {
         if let selectedPairID {
             return "已选编号 \(selectedPairID)。点一个日期，让这一天从它开始。"
         }
-        return "先选一组，再点日期；整条计划会一起移动。"
+        return "先选一\(content.unit)，再点日期；整条计划会一起移动。"
     }
 
     private var monthStart: Date {
@@ -518,7 +542,7 @@ private struct PlanCalendarShiftView: View {
 
     private func select(day: LocalDay) {
         guard let selectedPairID else {
-            adjustmentMessage = "请先选择一个视频组。"
+            adjustmentMessage = "请先选择一个\(content.displayName)。"
             adjustmentSucceeded = false
             return
         }
@@ -565,6 +589,7 @@ private struct PlanCalendarShiftView: View {
 }
 
 private struct CalendarDaySelectionCell: View {
+    let content: StudyContent
     let day: LocalDay
     let pairID: Int?
     let accessibilityDate: String
@@ -597,8 +622,8 @@ private struct CalendarDaySelectionCell: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(dayIdentifier)
-        .accessibilityLabel("\(accessibilityDate)\(pairID.map { "，当天第一组为编号 \($0)" } ?? "，无计划")")
-        .accessibilityHint(hasSelectedPair ? "让这一天从已选视频组开始，整条计划一起移动" : "请先选择一个视频组")
+        .accessibilityLabel("\(accessibilityDate)\(pairID.map { "，当天第一\(content.unit)为编号 \($0)" } ?? "，无计划")")
+        .accessibilityHint(hasSelectedPair ? "让这一天从已选\(content.displayName)开始，整条计划一起移动" : "请先选择一个\(content.displayName)")
     }
 
     private var dayIdentifier: String {
@@ -607,6 +632,7 @@ private struct CalendarDaySelectionCell: View {
 }
 
 private struct SavePlanPreviewView: View {
+    let content: StudyContent
     let oldPlan: ViewingPlan?
     let newPlan: ViewingPlan
     let calendar: Calendar
@@ -623,7 +649,7 @@ private struct SavePlanPreviewView: View {
                         .foregroundStyle(changesToday ? AppTheme.warning : AppTheme.accent)
                         .accessibilityIdentifier("schedule.preview.todayImpact")
                     Text(changesToday
-                         ? "保存后，严格模式的今日进度会重置，从第一个视频重新开始。"
+                         ? (content == .video ? "保存后，严格模式的今日进度会重置，从第一个视频重新开始。" : "保存后，今日 PDF 进度会重置，从第一份重新开始。")
                          : "已记录的今日播放进度会保留。")
                         .font(.subheadline).foregroundStyle(AppTheme.muted)
                 }
@@ -631,8 +657,8 @@ private struct SavePlanPreviewView: View {
                 Section("变更预览") {
                     LabeledContent("原开始日期", value: oldPlan.map { format($0.startDay) } ?? "尚无计划")
                     LabeledContent("新开始日期", value: format(newPlan.startDay))
-                    LabeledContent("原视频组数", value: "\(oldPlan?.orderedPairIDs.count ?? 0)")
-                    LabeledContent("新视频组数", value: "\(newPlan.orderedPairIDs.count)")
+                    LabeledContent(content == .video ? "原视频组数" : "原 PDF 份数", value: "\(oldPlan?.orderedPairIDs.count ?? 0)")
+                    LabeledContent(content == .video ? "新视频组数" : "新 PDF 份数", value: "\(newPlan.orderedPairIDs.count)")
                 }
                 .listRowBackground(AppTheme.surface)
 

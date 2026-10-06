@@ -30,6 +30,14 @@ struct AppDirectories {
         applicationSupportURL.appendingPathComponent("schedule.json", isDirectory: false)
     }
 
+    var razURL: URL {
+        documentsURL.appendingPathComponent("raz", isDirectory: true)
+    }
+
+    var pdfScheduleURL: URL {
+        applicationSupportURL.appendingPathComponent("raz-schedule.json", isDirectory: false)
+    }
+
     func folderURL(for language: VideoLanguage) -> URL {
         switch language {
         case .chinese: chineseURL
@@ -45,6 +53,7 @@ struct AppDirectories {
         try createProtectedDirectory(documentsURL)
         try createProtectedDirectory(chineseURL)
         try createProtectedDirectory(englishURL)
+        try createProtectedDirectory(razURL)
         try createProtectedDirectory(applicationSupportURL)
     }
 

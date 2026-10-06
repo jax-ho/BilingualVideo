@@ -1,0 +1,13 @@
+Local speech uses Kokoro-82M by hexgrad (Apache-2.0):
+https://huggingface.co/hexgrad/Kokoro-82M
+
+CoreML runtime and converted models: Jud/kokoro-coreml (Apache-2.0),
+runtime v0.11.2; model release models-2026-03-23:
+https://github.com/Jud/kokoro-coreml
+
+English grapheme-to-phoneme fallback: Jud/swift-bart-g2p (Apache-2.0):
+https://github.com/Jud/swift-bart-g2p
+
+The Apache-2.0 license text is included at KokoroModels/LICENSE.txt.
+The af_heart voice embeddings have been converted from binary to JSON;
+their numerical values are unchanged. The upstream CoreML runtime source is unmodified.

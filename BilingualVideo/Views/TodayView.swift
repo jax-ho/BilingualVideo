@@ -7,6 +7,8 @@ struct TodayView: View {
     @State private var selectedVideo: PlayableVideo?
     @State private var strictRequest: StrictPlaybackRequest?
     @State private var playbackErrorMessage: String?
+    @State private var isShowingStudySession = false
+    @State private var startingStudyVideo: PlayableVideo?
 
     var body: some View {
         ScrollView {
@@ -15,11 +17,16 @@ struct TodayView: View {
                     Text(appModel.currentDate.formatted(date: .complete, time: .omitted))
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(AppTheme.muted)
-                    Text("今天的放映")
+                    Text(appModel.savedPDFPlan == nil ? "今天的放映" : "今天的学习")
                         .font(.system(.largeTitle, design: .rounded, weight: .bold))
                 }
 
-                content
+                if !appModel.todayPDFIDs.isEmpty { studyEntry }
+                else { content }
+                if appModel.todayPDFIDs.isEmpty, appModel.savedPDFPlan != nil {
+                    Text("今天没有安排 PDF。需要调整时，请家长查看 PDF 计划。")
+                        .font(.subheadline).foregroundStyle(AppTheme.muted)
+                }
             }
             .frame(maxWidth: 980, alignment: .leading)
             .frame(maxWidth: .infinity)
@@ -33,6 +40,9 @@ struct TodayView: View {
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(item: $strictRequest, onDismiss: { appModel.refreshToday() }) { request in
             StrictVideoPlayerView(request: request, appModel: appModel)
+        }
+        .fullScreenCover(isPresented: $isShowingStudySession, onDismiss: { appModel.refreshToday() }) {
+            StudySessionView(startingVideo: startingStudyVideo).environmentObject(appModel)
         }
         .background {
             NativeVideoPlayerPresenter(
@@ -55,6 +65,75 @@ struct TodayView: View {
         } message: {
             Text(playbackErrorMessage ?? "请让家长检查今天的视频资源。")
         }
+    }
+
+    private var studyEntry: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            HStack(spacing: 20) {
+                SpringPortrait().frame(width: 100, height: 100)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("今天共 \(appModel.todayStates.count) 组视频 · \(appModel.todayPDFIDs.count) 份 PDF")
+                        .font(.system(.title2, design: .rounded, weight: .bold))
+                    Text(appModel.learningOrder.displayName).font(.subheadline).foregroundStyle(AppTheme.muted)
+                }
+            }
+            ForEach(appModel.learningOrder.contents) { content in
+                HStack(spacing: 12) {
+                    let finished = content == .video ? appModel.videosFinishedToday : appModel.pdfProgressToday?.isFinished == true
+                    Image(systemName: finished ? "checkmark.circle.fill" : content == .video ? "play.circle" : "book.closed")
+                        .font(.title2).foregroundStyle(AppTheme.accent)
+                    Text(content.displayName).font(.headline)
+                    Spacer()
+                    if finished { Text("已完成").foregroundStyle(AppTheme.accent) }
+                    else if content == .pdf, let progress = appModel.pdfProgressToday, progress.hasStarted {
+                        Text("第 \(progress.index + 1) 份 · 第 \(progress.pageIndex + 1) 页").foregroundStyle(AppTheme.muted)
+                    } else if content == .video, let progress = appModel.strictProgressToday, progress.hasStarted {
+                        Text("第 \(progress.index + 1) / \(progress.episodeCount) 集").foregroundStyle(AppTheme.muted)
+                    } else if content == .video, appModel.playbackMode == .normal,
+                              let progress = appModel.savedPlan?.normalCompletion,
+                              progress.day == appModel.scheduleService.day(containing: appModel.currentDate) {
+                        Text("已看 \(progress.completedVideoIDs.count) / \(progress.videoIDs.count) 集").foregroundStyle(AppTheme.muted)
+                    } else { Text("待学习").foregroundStyle(AppTheme.muted) }
+                }
+            }
+            if appModel.nextStudyContent != nil {
+                Button { startingStudyVideo = nil; isShowingStudySession = true } label: {
+                    Label(hasStartedStudyToday ? "继续学习" : "开始学习",
+                          systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SpringPrimaryButtonStyle())
+                .accessibilityIdentifier("today.study.start")
+                Text("随时返回，下次接着学。PDF 读到最后一页，点“结束观看”完成这份学习。")
+                    .font(.subheadline).foregroundStyle(AppTheme.muted)
+                if appModel.playbackMode == .normal, appModel.nextStudyContent == .video {
+                    Text("也可以选择今天的视频开始播放。").font(.subheadline).foregroundStyle(AppTheme.muted)
+                    ForEach(appModel.todayStates) { state in
+                        if case let .playable(pair) = state {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("编号 \(pair.id)").font(.headline)
+                                ViewThatFits(in: .horizontal) {
+                                    HStack(spacing: 16) { languageCards(for: pair) }.frame(minWidth: 440)
+                                    VStack(spacing: 16) { languageCards(for: pair) }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("今天的学习完成了，明天再来吧。")
+                    .font(.title3.bold()).foregroundStyle(AppTheme.accent)
+                    .accessibilityIdentifier("today.study.finished")
+            }
+        }
+        .padding(28)
+        .springSurface()
+    }
+
+    private var hasStartedStudyToday: Bool {
+        if appModel.pdfProgressToday?.hasStarted == true || appModel.strictProgressToday?.hasStarted == true { return true }
+        guard let tracking = appModel.savedPlan?.playbackTracking else { return false }
+        return tracking.day == appModel.scheduleService.day(containing: appModel.currentDate) && tracking.hasPlayed
     }
 
     @ViewBuilder
@@ -237,7 +316,10 @@ struct TodayView: View {
         ForEach(VideoLanguage.allCases) { language in
             VideoCard(language: language, pairID: pair.id) {
                 if let video = appModel.playableVideo(pairID: pair.id, for: language) {
-                    selectedVideo = video
+                    if !appModel.todayPDFIDs.isEmpty {
+                        startingStudyVideo = video
+                        isShowingStudySession = true
+                    } else { selectedVideo = video }
                 } else {
                     playbackErrorMessage = "这个视频还没有准备好，请让家长检查中英文视频是否齐全。"
                 }

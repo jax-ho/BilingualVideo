@@ -130,6 +130,8 @@ struct ViewingPlan: Codable, Equatable {
     var scheduledDays: [LocalDay]? = nil
     var playbackTracking: PlanPlaybackTracking? = nil
     var strictPlayback: StrictPlaybackProgress? = nil
+    var pdfReading: PDFReadingProgress? = nil
+    var normalCompletion: NormalVideoCompletion? = nil
 
     func hasSameSchedule(as other: ViewingPlan) -> Bool {
         startDay == other.startDay && orderedPairIDs == other.orderedPairIDs

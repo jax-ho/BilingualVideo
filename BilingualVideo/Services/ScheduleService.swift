@@ -12,9 +12,13 @@ struct ScheduleService {
     }
 
     func generate(pairs: [VideoPair], startDate: Date, now: Date = Date()) -> ViewingPlan {
+        generate(identifiers: pairs.map(\.id), startDate: startDate, now: now)
+    }
+
+    func generate(identifiers: [Int], startDate: Date, now: Date = Date()) -> ViewingPlan {
         ViewingPlan(
             startDay: day(containing: startDate),
-            orderedPairIDs: pairs.sorted { $0.id < $1.id }.map(\.id),
+            orderedPairIDs: identifiers.sorted(),
             updatedAt: now
         )
     }

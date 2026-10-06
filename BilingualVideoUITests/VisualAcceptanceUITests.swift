@@ -118,6 +118,10 @@ final class VisualAcceptanceUITests: XCTestCase {
         XCTAssertEqual(app.buttons.matching(identifier: "today.strict.play").count, 1)
 
         app.buttons["ui-test.parent"].tap()
+        let settings = app.cells.containing(.any, identifier: "settings.viewing").firstMatch
+        for _ in 0..<6 where !settings.exists || !settings.isHittable {
+            app.collectionViews["边栏"].swipeUp()
+        }
         openDestination("settings.viewing", in: app)
         let count = app.steppers["settings.dailyGroupCount"]
         let increment = count.buttons["settings.dailyGroupCount-Increment"]

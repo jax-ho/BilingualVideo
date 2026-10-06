@@ -3,9 +3,14 @@ name: BilingualVideo
 options:
   bundleIdPrefix: com.jax
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "18.0"
   xcodeVersion: "26.0"
   createIntermediateGroups: true
+
+packages:
+  KokoroCoreML:
+    path: Vendor/KokoroCoreML
+    traits: [default]
 
 settings:
   base:
@@ -21,6 +26,13 @@ targets:
     productName: "放牛班的春天"
     sources:
       - path: BilingualVideo
+        excludes:
+          - Resources/KokoroModels
+      - path: BilingualVideo/Resources/KokoroModels
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: KokoroCoreML
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jax.BilingualVideo

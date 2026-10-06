@@ -73,7 +73,7 @@ final class InteractionClarityUITests: XCTestCase {
         app.buttons["schedule.editor.close"].tap()
         let discard = app.buttons["放弃更改并关闭"]
         XCTAssertTrue(discard.waitForExistence(timeout: 3))
-        XCTAssertTrue(app.alerts.staticTexts["观看计划尚未保存。其他观看设置的更改已生效。"].exists)
+        XCTAssertTrue(app.alerts.staticTexts["学习计划尚未保存。其他学习设置的更改已生效。"].exists)
         discard.tap()
         XCTAssertTrue(app.buttons["today.play.5.chinese"].waitForExistence(timeout: 3), "Discarding the plan must keep today's original schedule and the selected normal mode")
         reveal(app.buttons["today.play.20.english"], in: app)

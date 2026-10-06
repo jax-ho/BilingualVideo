@@ -56,6 +56,23 @@ final class ScheduleStore {
     }
 
     private func validate(_ plan: ViewingPlan) throws {
+        if let progress = plan.pdfReading {
+            guard !progress.bookIDs.isEmpty,
+                  Set(progress.bookIDs).count == progress.bookIDs.count,
+                  (0...progress.bookIDs.count).contains(progress.index),
+                  progress.pageIndex >= 0, progress.pageCount >= 0,
+                  progress.pageCount == 0 ? progress.pageIndex == 0 : progress.pageIndex < progress.pageCount,
+                  !progress.isFinished || (progress.pageIndex == 0 && progress.pageCount == 0) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+        }
+        if let completion = plan.normalCompletion {
+            guard !completion.pairIDs.isEmpty,
+                  Set(completion.pairIDs).count == completion.pairIDs.count,
+                  Set(completion.completedVideoIDs).isSubset(of: Set(completion.videoIDs)) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+        }
         if let progress = plan.strictPlayback {
             guard !progress.pairIDs.isEmpty,
                   Set(progress.pairIDs).count == progress.pairIDs.count,

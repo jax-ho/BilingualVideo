@@ -26,6 +26,7 @@ final class LocalVideoPlaybackSession {
     var onProgress: ((PlayableVideo, Double) -> Void)?
     var onPlayingChanged: ((Bool) -> Void)?
     var onEnded: ((PlayableVideo) -> Void)?
+    var onEpisodeEnded: ((PlayableVideo) throws -> Void)?
     var nextVideo: ((PlayableVideo) throws -> PlayableVideo?)?
     var allowsAutomaticAdvance = true
     private(set) var currentVideo: PlayableVideo?
@@ -245,6 +246,13 @@ final class LocalVideoPlaybackSession {
                       let item,
                       self.loadID == loadID,
                       self.player.currentItem === item else { return }
+                do {
+                    if let video = self.currentVideo { try self.onEpisodeEnded?(video) }
+                } catch {
+                    self.player.pause()
+                    self.onFailure?(error.localizedDescription)
+                    return
+                }
                 if let onEnded = self.onEnded, let video = self.currentVideo {
                     onEnded(video)
                 } else {

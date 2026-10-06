@@ -245,7 +245,7 @@ final class StrictPlaybackUITests: XCTestCase {
 
     private func openViewingSettings(in app: XCUIApplication) {
         app.buttons["ui-test.parent"].tap()
-        let settings = app.staticTexts["观看设置"]
+        let settings = app.staticTexts["学习设置"]
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.tap()
         let reset = app.buttons["settings.resetTodayProgress"]
@@ -273,7 +273,7 @@ final class StrictPlaybackUITests: XCTestCase {
 
     private func increaseDailyGroupCount(in app: XCUIApplication) {
         app.buttons["ui-test.parent"].tap()
-        let settings = app.staticTexts["观看设置"]
+        let settings = app.staticTexts["学习设置"]
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.tap()
         let stepper = app.steppers["settings.dailyGroupCount"]
@@ -284,7 +284,7 @@ final class StrictPlaybackUITests: XCTestCase {
 
     private func shiftPlanOneDayEarlier(in app: XCUIApplication) {
         app.buttons["ui-test.parent"].tap()
-        let editor = app.staticTexts["计划编辑"]
+        let editor = app.staticTexts["视频计划"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
         editor.tap()
         let previous = app.buttons["schedule.shift.previous"]
