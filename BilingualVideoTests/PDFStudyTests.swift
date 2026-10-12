@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import BilingualVideo
 
 @MainActor
@@ -193,6 +194,57 @@ final class PDFStudyTests: XCTestCase {
         XCTAssertThrowsError(try model.beginPDFReading())
     }
 
+    func testReaderRapidTurnsRepeatedClicksAndCloseIgnoreLateAudio() async throws {
+        let environment = try TemporaryAppEnvironment()
+        let now = testDate(2026, 10, 3)
+        let app = try preparedModel(environment, now: { now })
+        let request = try XCTUnwrap(app.beginPDFReading())
+        let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 200, height: 200))
+        let data = renderer.pdfData { context in
+            for _ in 0..<3 {
+                context.beginPage()
+                ("Hello world" as NSString).draw(at: CGPoint(x: 20, y: 20),
+                    withAttributes: [.font: UIFont.systemFont(ofSize: 20)])
+            }
+        }
+        try data.write(to: request.url)
+        let speech = ControlledReaderSpeech()
+        let reader = PDFReaderModel(request: request, appModel: app, speech: speech)
+        await reader.load()
+        XCTAssertNil(reader.error)
+        reader.pages = (0..<3).map { ReadingPage(index: $0, text: "page-\($0)", lines: []) }
+        reader.speak()
+        await speech.waitForRequests(1)
+        let firstGeneration = try XCTUnwrap(reader.generation)
+        reader.speak() // Preparing clicks are intentionally ignored.
+        await Task.yield()
+        XCTAssertEqual(speech.count, 1)
+        reader.turn(1)
+        reader.speak()
+        await speech.waitForRequests(2)
+        let secondGeneration = try XCTUnwrap(reader.generation)
+        reader.turn(1)
+        reader.speak()
+        await speech.waitForRequests(3)
+        let thirdGeneration = try XCTUnwrap(reader.generation)
+        // Deliberately ignore cancellation in this mock and complete old work.
+        speech.complete(0, result: .success(URL(fileURLWithPath: "/missing-old.wav")))
+        speech.complete(1, result: .failure(LocalSpeechError.unavailable))
+        await firstGeneration.value
+        await secondGeneration.value
+        XCTAssertTrue(reader.isPreparing)
+        XCTAssertFalse(reader.isSpeaking)
+        XCTAssertNil(reader.speechError) // No stale playback attempt/error.
+        reader.close()
+        speech.complete(2, result: .success(URL(fileURLWithPath: "/missing-closed.wav")))
+        await thirdGeneration.value
+        XCTAssertFalse(reader.isPreparing)
+        XCTAssertFalse(reader.isSpeaking)
+        XCTAssertNil(reader.speechError)
+        reader.speak()
+        XCTAssertEqual(speech.count, 3)
+    }
+
     private func makeModel(_ environment: TemporaryAppEnvironment, now: @escaping () -> Date) -> AppModel {
         AppModel(directories: environment.directories, scheduleService: ScheduleService(calendar: testCalendar()),
                  preferences: environment.preferences, now: now)
@@ -207,5 +259,134 @@ final class PDFStudyTests: XCTestCase {
         try model.savePlan(XCTUnwrap(model.makeCandidate(startDate: now())))
         try model.savePDFPlan(XCTUnwrap(model.makePDFCandidate(startDate: now())))
         return model
+    }
+}
+
+final class LocalSpeechTaskTests: XCTestCase {
+    func testRapidRequestsCancelPromptlyAndOnlyLatestPendingSynthesizes() async throws {
+        let entered = expectation(description: "first synthesis entered")
+        let release = DispatchSemaphore(value: 0)
+        let calls = LockedSpeechCalls()
+        let scheduler = SpeechScheduler { text, check in
+            calls.append(text)
+            if text == "first" {
+                entered.fulfill()
+                release.wait() // Model a non-interruptible Core ML prediction.
+            }
+            try check()
+            return URL(fileURLWithPath: "/\(text).wav")
+        }
+        let first = Task { try await scheduler.audio(for: "first") }
+        await fulfillment(of: [entered], timeout: 2)
+        defer { release.signal() }
+        first.cancel()
+        await assertCancelled(first) // Must complete BEFORE releasing synthesis.
+        for index in 0..<50 {
+            let task = Task { try await scheduler.audio(for: "page-\(index)") }
+            await waitForPending("page-\(index)", scheduler)
+            task.cancel()
+            await assertCancelled(task)
+        }
+        let old = Task { try await scheduler.audio(for: "old") }
+        await waitForPending("old", scheduler)
+        let latest = Task { try await scheduler.audio(for: "latest") }
+        await waitForPending("latest", scheduler)
+        await assertCancelled(old)
+        release.signal()
+        let url = try await latest.value
+        XCTAssertEqual(url.lastPathComponent, "latest.wav")
+        XCTAssertEqual(calls.values, ["first", "latest"])
+    }
+
+    func testClosedReaderPendingRequestNeverRunsAndFailureDoesNotPoisonWorker() async throws {
+        let entered = expectation(description: "blocked")
+        let release = DispatchSemaphore(value: 0)
+        let calls = LockedSpeechCalls()
+        let scheduler = SpeechScheduler { text, _ in
+            calls.append(text)
+            if text == "blocked" { entered.fulfill(); release.wait() }
+            if text == "failure" { throw LocalSpeechError.unavailable }
+            return URL(fileURLWithPath: "/\(text).wav")
+        }
+        let blocked = Task { try await scheduler.audio(for: "blocked") }
+        await fulfillment(of: [entered], timeout: 2)
+        defer { release.signal() }
+        let closed = Task { try await scheduler.audio(for: "closed") }
+        await waitForPending("closed", scheduler)
+        closed.cancel()
+        await assertCancelled(closed)
+        blocked.cancel()
+        await assertCancelled(blocked)
+        release.signal()
+        do { _ = try await scheduler.audio(for: "failure"); XCTFail("Expected failure") }
+        catch is CancellationError { XCTFail("Unexpected cancellation") }
+        catch {}
+        _ = try await scheduler.audio(for: "reopened")
+        XCTAssertEqual(calls.values, ["blocked", "failure", "reopened"])
+    }
+
+    func testCacheEvictsOldestAndPreservesReturnedAudioAndUnrelatedFiles() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        for (index, name) in ["old.wav", "recent.wav", "playing.wav", "keep.txt"].enumerated() {
+            let url = directory.appendingPathComponent(name)
+            try Data(repeating: 0, count: 10).write(to: url)
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(index))], ofItemAtPath: url.path)
+        }
+        try PageAudioCache.prune(directory: directory, protecting: directory.appendingPathComponent("playing.wav"), maximumBytes: 20)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("old.wav").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("recent.wav").path))
+        try PageAudioCache.prune(directory: directory, protecting: directory.appendingPathComponent("playing.wav"), maximumBytes: 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("playing.wav").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("keep.txt").path))
+    }
+
+    private func assertCancelled(_ task: Task<URL, Error>) async {
+        let completed = expectation(description: "cancelled caller released")
+        Task {
+            do { _ = try await task.value; XCTFail("Cancelled request returned audio") }
+            catch is CancellationError {}
+            catch { XCTFail("Unexpected error: \(error)") }
+            completed.fulfill()
+        }
+        await fulfillment(of: [completed], timeout: 2)
+    }
+
+    private func waitForPending(_ text: String, _ scheduler: SpeechScheduler) async {
+        let deadline = Date().addingTimeInterval(2)
+        while scheduler.pendingText != text, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertEqual(scheduler.pendingText, text)
+    }
+}
+
+private final class LockedSpeechCalls: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+    func append(_ text: String) { lock.lock(); storage.append(text); lock.unlock() }
+    var values: [String] { lock.lock(); defer { lock.unlock() }; return storage }
+}
+
+@MainActor
+private final class ControlledReaderSpeech: SpeechProviding, @unchecked Sendable {
+    private var requests: [CheckedContinuation<URL, Error>?] = []
+    var count: Int { requests.count }
+    nonisolated func audio(for text: String) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            Task { @MainActor in self.requests.append(continuation) }
+        }
+    }
+    func complete(_ index: Int, result: Result<URL, Error>) {
+        requests[index]?.resume(with: result)
+        requests[index] = nil
+    }
+    func waitForRequests(_ count: Int) async {
+        let deadline = Date().addingTimeInterval(2)
+        while requests.count < count, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertEqual(requests.count, count)
     }
 }
