@@ -14,9 +14,9 @@ final class PDFReaderModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published private(set) var request: PDFReadingRequest
     @Published var error: String?
     @Published private(set) var pageImages: [Int: CGImage] = [:]
-    private let speech = LocalSpeech()
+    private let speech: any SpeechProviding
     private var player: AVAudioPlayer?
-    private var generation: Task<Void, Never>?
+    private(set) var generation: Task<Void, Never>?
     private var playbackID = UUID()
     private var document: PDFDocument?
     private var images: [Int: CGImage] = [:]
@@ -25,7 +25,8 @@ final class PDFReaderModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var isClosed = false
     private var needsNextBook = false
 
-    init(request: PDFReadingRequest, appModel: AppModel) {
+    init(request: PDFReadingRequest, appModel: AppModel, speech: any SpeechProviding = LocalSpeech.shared) {
+        self.speech = speech
         self.request = request
         self.appModel = appModel
         super.init()
